@@ -1,0 +1,9 @@
+[package]
+name = "litec_ast"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+litec_span = { path = "../litec_span" }
+index_vec = "0.1.4"
+serde = { version = "1.0.228", features = ["derive"] }
