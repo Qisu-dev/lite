@@ -1,21 +1,32 @@
 use crate::{
-    token::LiteralKind,
-    util::{accos_op::Fixity, precedence::Precedence},
+    token::{self},
+    util::{Fixity, Precedence},
 };
-use litec_span::{Span, Spanned, StringId};
+use litec_span::{DUMMY_SPAN, Span, Spanned, Symbol};
 use serde::{Deserialize, Serialize};
+use traversable::{Traversable, TraversableMut};
 
 index_vec::define_index_type! {
-    pub struct NodeId = u32;
+    #[derive(Traversable, TraversableMut)] #[traverse(skip_self)] pub struct NodeId = u32;
     DEBUG_FORMAT = "Node({})";
 }
 
 pub const DUMMY_NODE_ID: NodeId = NodeId::from_raw_unchecked(u32::MAX);
 
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub enum AttrArg {
+    /// 路径/标识符（如 `Debug`, `Clone`）
+    Path(Path),
+    /// 字面量（如 `"linux"`, `42`, `true`）
+    Lit(token::Lit),
+    /// 键值对（如 `target = "linux"`）
+    KeyValue { key: Ident, value: Box<AttrArg> },
+}
+
 #[derive(Debug, Clone)]
 pub struct Attr {
-    pub path: Path,          // 如 `lang`
-    pub arg: Option<StrLit>, // 参数，如 `"add"`
+    pub path: Path,         // 属性名称（如 `derive`, `cfg`, `repr`）
+    pub args: Vec<AttrArg>, // 参数列表，可以为空
     pub span: Span,
 }
 
@@ -34,7 +45,7 @@ pub enum Visibility {
 #[derive(Debug, Clone)]
 pub struct Item<K = ItemKind> {
     pub node_id: NodeId,
-    pub attr: Option<Attr>,
+    pub attr: Vec<Attr>,
     pub visibility: Visibility,
     pub span: Span,
     pub kind: K,
@@ -47,7 +58,7 @@ pub enum ItemKind {
     Fn(Fn),
     /// 一个结构体声明
     /// 例如 `struct Foo<A> { x: A }`
-    Struct(Ident, Generics, StructKind),
+    Struct(StructData),
     /// 一个使用声明
     /// e.g. `use foo;` `use foo::bar;` `use foo::bar as FooBar;`
     Use(UseTree),
@@ -69,36 +80,68 @@ pub enum ItemKind {
     /// 一个枚举定义
     /// 例如 `enum Result<T, E> { OK(T), Err(E) }`
     Enum(Ident, Generics, Vec<Variant>),
+    /// 一个常亮定义(总会内联)
+    /// 类型必须写出
+    /// 例如 `const FOO: Foo = Foo { ... };`
+    Const(Ident, Ty, Expr),
+    /// 一个运行时常亮定义(用不内联)
+    /// 类型总是写出
+    /// 例如 `static mut FOO: Foo = Foo { ... };`
+    Static(Mutability, Ident, Ty, Expr),
+    /// 一个联合
+    /// 例如 `union Foo { a: i32, pub b: i64 }`
+    Union(UnionData),
 }
 
 #[derive(Debug, Clone)]
-pub enum StructKind {
-    Unit,               // struct Foo;
-    Tuple(Vec<Ty>),     // struct Foo(i32, bool);
-    Struct(Vec<Field>), // struct Foo { x: i32, y: bool }
+pub struct StructData {
+    pub node_id: NodeId,
+    pub name: Ident,
+    pub generics: Generics,
+    pub where_clause: Option<WhereClause>,
+    pub kind: VariantData,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionData {
+    pub node_id: NodeId,
+    pub name: Ident,
+    pub generics: Generics,
+    pub where_clause: Option<WhereClause>,
+    pub kind: VariantData,
+}
+
+#[derive(Debug, Clone)]
+pub struct Enum {
+    pub node_id: NodeId,
+    pub name: Ident,
+    pub generics: Generics,
+    pub where_clause: Option<WhereClause>,
+    pub kind: Vec<Variant>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Variant {
+    pub node_id: NodeId,
     pub ident: Ident,
     pub data: VariantData,
     pub span: Span,
-    pub node_id: NodeId,
 }
 
 #[derive(Debug, Clone)]
 pub enum VariantData {
-    Struct(Vec<VariantField>),
+    Struct(Vec<FieldData>),
     Tuple(Vec<Ty>),
     Unit,
 }
 
 #[derive(Debug, Clone)]
-pub struct VariantField {
+pub struct FieldData {
+    pub node_id: NodeId,
+    pub visibility: Visibility,
     pub name: Ident,
     pub ty: Ty,
     pub span: Span,
-    pub node_id: NodeId,
 }
 
 pub type TraitItem = Item<TraitItemKind>;
@@ -106,6 +149,26 @@ pub type TraitItem = Item<TraitItemKind>;
 #[derive(Debug, Clone)]
 pub enum TraitItemKind {
     Fn(FnSig),
+    Ty(TypeAlias),
+}
+
+#[derive(Debug, Clone)]
+pub struct AssociatedType {
+    pub node_id: NodeId,
+    pub name: Ident,
+    pub bounds: Option<Bounds>,
+    pub where_clause: Option<WhereClause>,
+    pub default_ty: Option<Ty>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssociatedConstant {
+    pub node_id: NodeId,
+    pub name: Ident,
+    pub ty: Ty,
+    pub default_expr: Option<Expr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -122,7 +185,9 @@ pub type ImplItem = Item<ImplItemKind>;
 
 #[derive(Debug, Clone)]
 pub enum ImplItemKind {
-    Fn(Fn),          // 方法定义
+    Fn(Fn),
+    Ty(AssociatedType),
+    Const(AssociatedConstant),
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +195,7 @@ pub struct TypeAlias {
     pub node_id: NodeId,
     pub name: Ident,
     pub generics: Generics,
+    pub where_clause: Option<WhereClause>,
     pub ty: Ty,
 }
 
@@ -153,6 +219,7 @@ pub struct FnSig {
     pub params: Vec<Param>,
     pub return_type: FnRetTy,
     pub is_variadic: bool,
+    pub abi: Option<StrLit>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,8 +233,10 @@ pub type ExternItem = Item<ExternItemKind>;
 
 #[derive(Debug, Clone)]
 pub enum ExternItemKind {
-    /// 一个外部函数声明
     Fn(Fn),
+    Struct(StructData),
+    Enum(Enum),
+    Union(UnionData),
 }
 
 #[derive(Debug, Clone)]
@@ -204,14 +273,14 @@ pub struct Param {
 
 #[derive(Debug, Clone)]
 pub enum ParamKind {
-    Normal(Pat, Ty),
+    Normal(Box<Pat>, Box<Ty>),
     /// 比如 `*self` `*mut self`
     SelfPtr(Mutability),
     /// 比如 `self` `mut self`
     SelfValue(Mutability),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Block {
     pub node_id: NodeId,
     pub stmts: Vec<Stmt>,
@@ -227,14 +296,14 @@ pub struct Field {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Expr {
     pub node_id: NodeId,
     pub kind: ExprKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum ExprKind {
     /// 二元运算符
     /// 例如 `1 + 2`
@@ -242,7 +311,7 @@ pub enum ExprKind {
     /// 一元运算符
     /// 例如 `!true`
     Unary(UnOp, Box<Expr>),
-    Literal(Lit),
+    Literal(token::Lit),
     /// 用括号包裹的表达式
     /// 例如 `(1 + 2)`
     Grouped(Box<Expr>),
@@ -267,7 +336,7 @@ pub enum ExprKind {
     /// for循环
     /// 例如 `for i in 0..10 { 1 }`
     For {
-        variable: Pat,
+        variable: Box<Pat>,
         iter: Box<Expr>,
         body: Box<Block>,
     },
@@ -276,7 +345,7 @@ pub enum ExprKind {
     Index(Box<Expr>, Box<Expr>),
     /// 范围
     /// 例如 `1..2` `1..=2`
-    Range(Box<Expr>, Box<Expr>, RangeLimits),
+    Range(Option<Box<Expr>>, Option<Box<Expr>>, RangeLimits),
     /// 无限循环
     /// 例如 `loop { 1 }`
     Loop(Box<Block>),
@@ -316,6 +385,27 @@ pub enum ExprKind {
     /// 跳出循环
     /// 例如 `break;` `break 1;`
     Break(Option<Box<Expr>>),
+    /// 未定义的值
+    /// 例如 `undefined`
+    Undefined,
+    /// 匹配表达式,类型为bool
+    /// 例如 `let Foo { a, b } = Foo::default()`
+    MatchBool {
+        pattern: Box<Pat>,
+        matched: Box<Expr>,
+    },
+    /// 一个下划线 用在等式中忽略值
+    Underscore,
+    Closure(Vec<ClosureParam>, Box<Expr>),
+    /// 一个try 表达式, 在类型Result为Err还有Option为None等的时候会直接返回
+    /// 例如 `Result::Err(())?` `None?`
+    Try(Box<Expr>),
+}
+
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub struct ClosureParam {
+    pub name: Ident,
+    pub ty: Option<Ty>,
 }
 
 impl ExprKind {
@@ -335,7 +425,7 @@ impl ExprKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Arm {
     pub pat: Pat,
     pub guard: Option<Box<Expr>>, // if condition
@@ -344,14 +434,14 @@ pub struct Arm {
     pub node_id: NodeId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Stmt {
     pub node_id: NodeId,
     pub kind: StmtKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum StmtKind {
     /// 不带分号的表达式
     /// 比如 `if cond { .. } else { .. }`
@@ -359,18 +449,18 @@ pub enum StmtKind {
     /// 带分号的表达式
     /// 比如 `1;` `loop { .. };`
     Semi(Box<Expr>),
-    Let(Pat, Option<Box<Ty>>, Option<Box<Expr>>),
+    Let(Box<Pat>, Option<Box<Ty>>, Option<Box<Expr>>),
     Defer(Box<Expr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Ty {
     pub node_id: NodeId,
     pub kind: TyKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum TyKind {
     /// `std::vec::Vec<T>` `Foo`
     Path { path: Path },
@@ -403,7 +493,7 @@ pub enum TyKind {
     SelfTy,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Path {
     pub node_id: NodeId,
     pub segments: Vec<PathSegment>,
@@ -414,13 +504,13 @@ impl ToString for Path {
     fn to_string(&self) -> String {
         self.segments
             .iter()
-            .map(|seg| seg.name.text.to_string()) // 假设 StringId 实现了 ToString
+            .map(|seg| seg.name.text.as_str()) // 假设 StringId 实现了 ToString
             .collect::<Vec<_>>()
             .join("::")
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct PathSegment {
     pub node_id: NodeId,
     pub name: Ident,
@@ -439,16 +529,16 @@ impl PathSegment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct GenericArgs {
     pub args: Vec<GenericArg>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum GenericArg {
-    Type(Ty),
-    // 未来会有 Const
+    Type(Box<Ty>),
+    Const(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -463,7 +553,7 @@ impl Generics {
         Self {
             node_id: DUMMY_NODE_ID,
             params: Vec::new(),
-            span: Span::default(),
+            span: DUMMY_SPAN,
         }
     }
 
@@ -487,19 +577,38 @@ pub struct Bounds {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+pub struct WhereClause {
+    pub node_id: NodeId,
+    pub predicates: Vec<WherePredicate>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum WherePredicate {
+    TypeBound {
+        path: Path,     // 泛型参数路径（如 `T`）
+        bounds: Bounds, // trait 约束列表（如 `Clone + Send`）
+    },
+    Equality {
+        path: Path,  // 关联类型路径（如 `T::Item`）
+        value: Expr, // 右侧表达式（编译期常量或类型）
+    },
+}
+
+#[derive(Debug, Clone, Copy, Traversable, TraversableMut)]
 pub struct Ident {
-    pub text: StringId,
+    pub text: Symbol,
     pub span: Span,
 }
 
 impl Ident {
-    pub fn new(text: StringId, span: Span) -> Self {
+    pub fn new(text: Symbol, span: Span) -> Self {
         Self { text, span }
     }
 
-    pub fn to_string(&self) -> String {
-        self.text.to_string()
+    pub fn to_string(&self) -> &str {
+        self.text.as_str()
     }
 
     pub fn to_path(&self) -> Path {
@@ -516,7 +625,7 @@ impl Ident {
     }
 }
 
-impl From<Ident> for StringId {
+impl From<Ident> for Symbol {
     #[inline]
     fn from(value: Ident) -> Self {
         value.text
@@ -539,18 +648,18 @@ impl Eq for Ident {}
 
 #[derive(Debug, Clone)]
 pub enum FnRetTy {
-    // span指向了类型插入的地方
     Default(Span),
     Ty(Ty),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
 pub enum Mutability {
     Mutable,
     Immutable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
+#[traverse(skip_self)]
 pub enum BinOpKind {
     /// +
     Add,
@@ -627,7 +736,8 @@ impl BinOpKind {
 
 pub type BinOp = Spanned<BinOpKind>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
+#[traverse(skip_self)]
 pub enum AssignOpKind {
     /// +=
     AddAssign,
@@ -653,17 +763,20 @@ pub enum AssignOpKind {
 
 pub type AssignOp = Spanned<AssignOpKind>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
+#[traverse(skip_self)]
 pub enum UnOp {
     /// *
     Deref,
     /// !
     Not,
+    /// ~
+    BitNot,
     /// -
     Neg,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Traversable, TraversableMut)]
 pub enum RangeLimits {
     /// 半开合区间 `..`
     HalfOpen,
@@ -671,21 +784,14 @@ pub enum RangeLimits {
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Lit {
-    pub kind: LiteralKind,
-    pub value: StringId,
-    pub suffix: Option<StringId>,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct StructExpr {
     pub node_id: NodeId,
     pub path: Path,
     pub fields: Vec<StructExprField>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct StructExprField {
     pub name: Ident,
     pub value: Expr,
@@ -695,18 +801,18 @@ pub struct StructExprField {
 
 #[derive(Debug, Clone)]
 pub struct StrLit {
-    pub text: StringId,
+    pub text: Symbol,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Pat {
     pub node_id: NodeId,
     pub kind: PatKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum PatKind {
     /// 通配符 `_`
     Wild,
@@ -718,15 +824,19 @@ pub enum PatKind {
     Struct(Path, Vec<StructFieldPat>, bool), // bool 表示是否有 `..`
     /// 枚举模式 `Some(x)` 或 `None`
     Enum(Path, Option<Box<Pat>>),
-    /// 字面量模式 `0`, `"hello"`
-    Lit(Lit),
+    /// 表达式模式 `0`, `"hello"`
+    Expr(Box<Expr>),
     /// 范围模式 `1..=5`
-    Range(Box<Expr>, Box<Expr>, RangeLimits),
+    Range(Option<Box<Expr>>, Option<Box<Expr>>, Spanned<RangeLimits>),
+    /// 剩余 `..`
+    Rest,
+    /// 元素模式列表
+    Slice(Vec<Pat>),
     /// 多重模式 `1 | 2`
     Or(Vec<Pat>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct StructFieldPat {
     pub name: Ident,
     pub pat: Pat,

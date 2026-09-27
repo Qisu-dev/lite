@@ -1,0 +1,12 @@
+[package]
+name = "litec_parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+litec_ast = { path = "../litec_ast" }
+litec_error = { path = "../litec_error" }
+litec_span = { path = "../litec_span" }
+litec_session = { path = "../litec_session" }
+unicode-ident = "1.0.26"
+unicode-width = "0.2.2"

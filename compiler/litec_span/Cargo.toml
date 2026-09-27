@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+traversable = { workspace = true }
+scoped-tls-hkt = { workspace = true }
+rustc-hash = { workspace = true }
+litec_macros = { path = "../litec_macros" }
+stable-arena = { workspace = true }
+index_vec = { workspace = true }

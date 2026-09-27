@@ -1,4 +1,23 @@
 [workspace]
 resolver = "3"
 
-members = ["compiler/litec_ast", "compiler/litec_span"]
+members = [
+    "compiler/litec_ast",
+    "compiler/litec_span",
+    "compiler/litec_error",
+    "compiler/litec_session",
+    "compiler/litec_macros", "compiler/litec_parse",
+]
+
+[workspace.dependencies]
+thiserror = "2.0.21"
+index_vec = "0.1.4"
+serde = { version = "1.0.229", features = ["derive"] }
+traversable = { version = "0.3", features = ["derive", "std"] }
+scoped-tls-hkt = "0.1.5"
+rustc-hash = "2.1.3"
+syn = { version = "3.0.6", features = ["full", "extra-traits"] }
+quote = "1.0.47"
+proc-macro2 = "1.0.107"
+stable-arena = "0.3.0"
+darling = "0.24.1"
