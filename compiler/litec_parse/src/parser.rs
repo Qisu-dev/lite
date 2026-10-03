@@ -177,11 +177,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         let found = self.peek_kind();
         let expected_str = join_expected(expected);
         let msg = format!("expected {}, found {}", expected_str, found.describe());
-        self.emit(
-            Diag::error(msg)
-                .with_span(span)
-                .with_label(span, format!("expected {}", expected_str)),
-        )
+        self.emit(Diag::error(msg).with_span(span))
     }
 
     /// 跳到同步点——停在它前面，不消费
@@ -214,17 +210,10 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
             match T::parse(self) {
                 Ok(v) => items.push(v),
-                Err(e) => {
-                    let span = self.current_span();
-                    match T::error_node(span) {
-                        Some(node) => {
-                            items.push(node);
-                            // 跑恢复
-                            if run_recovery(T::recovery(), self) == RecoveryResult::Failed {
-                                break;
-                            }
-                        }
-                        None => return Err(e),
+                Err(_) => {
+                    // 错误已 emit —— 直接跑恢复
+                    if run_recovery(T::recovery(), self) == RecoveryResult::Failed {
+                        break;
                     }
                 }
             }
@@ -248,6 +237,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
                 }
             }
 
+            // 防死循环 —— 确保前进
             if self.cursor == before {
                 self.bump();
             }

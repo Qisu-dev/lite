@@ -1,5 +1,5 @@
 use litec_ast::ast::{
-    Arm, AssignOp, BinOp, Block, Expr, ExprKind, GenericArgs, Ident, Mutability, Pat, Path, PathSegment, QSelf, Ty, UnOp,
+    Arm, AssignOp, BinOp, Block, ClosureParam, Expr, ExprKind, GenericArgs, Ident, Mutability, Pat, Path, PathSegment, QSelf, Stmt, StructExpr, StructExprField, Ty, UnOp,
 };
 use litec_ast::token::{Lit, LiteralKind};
 use litec_ast::util::{AssocOp, Fixity, Precedence};
@@ -7,7 +7,8 @@ use litec_ast::{TokenKind, tok, token};
 use litec_error::{Diag, PResult};
 use litec_span::Span;
 
-use crate::parser::{Expected, ParseContext};
+use crate::parser::recovery::RecoveryResult;
+use crate::parser::{Expected, ParseContext, run_recovery};
 
 use super::ParseCtx;
 use super::trait_::Parse;
@@ -219,6 +220,10 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             | TokenKind::PathAccess => {
                 let path: Path = self.parse()?;
                 let span = path.span;
+                // `Point { x, y }` —— struct expr（`if x == Foo {}` 里被禁）
+                if self.check(tok!(OpenBrace)) && !self.no_struct_literal {
+                    return self.parse_struct_expr(path, span);
+                }
                 Ok(self.mk_expr(ExprKind::Path(path), span))
             }
 
@@ -247,12 +252,11 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
             tok!(-) => self.parse_unary(UnOp::Neg, span),
             tok!(!) => self.parse_unary(UnOp::Not, span),
-            tok!(&) => self.parse_ref_expr(Mutability::Immut, span),
-            tok!(mut) => {
-                self.bump();
-                self.parse_ref_expr(Mutability::Mut, span)
-            }
+            tok!(&) => self.parse_ref_expr(span),
             tok!(*) => self.parse_deref_expr(span),
+
+            tok!(||) => self.parse_closure_no_params(span),
+            tok!(|) => self.parse_closure(span),
 
             _ => Err(self.unexpected(&[Expected::Expr])),
         }
@@ -299,6 +303,95 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             }
         }
         Ok(expr)
+    }
+
+    fn parse_struct_expr(&mut self, path: Path, start: Span) -> PResult<Expr> {
+        self.expect(tok!(OpenBrace))?;
+
+        let mut fields = Vec::new();
+        while !self.check(tok!(CloseBrace)) && !self.at_eof() {
+            let field_start = self.current_span();
+            let name: Ident = self.parse()?;
+
+            let (value, is_shorthand) = if self.eat(tok!(:)) {
+                // 显式 `x: expr`
+                (self.parse_expr()?, false)
+            } else {
+                // Shorthand `x` → value = Path(x)
+                let v = self.mk_expr(ExprKind::Path(name.to_path()), name.span);
+                (v, true)
+            };
+
+            let field_span = field_start.extend(value.span);
+            fields.push(StructExprField {
+                name,
+                value,
+                is_shorthand,
+                span: field_span,
+            });
+
+            if !self.eat(tok!(,)) {
+                break;
+            }
+        }
+
+        let close = self.expect(tok!(CloseBrace))?;
+        let node_id = self.node_id();
+        Ok(self.mk_expr(
+            ExprKind::StructExpr(StructExpr {
+                node_id,
+                path,
+                fields,
+            }),
+            start.extend(close.span),
+        ))
+    }
+
+    /// `|| body` —— 零参数闭包
+    fn parse_closure_no_params(&mut self, start: Span) -> PResult<Expr> {
+        self.bump(); // `||`
+        let body = self.parse_expr_with_precedence(Precedence::Jump)?;
+        let span = start.extend(body.span);
+        Ok(self.mk_expr(ExprKind::Closure(Vec::new(), Box::new(body)), span))
+    }
+
+    /// `|a, b| body` / `|a: T, b| body`
+    fn parse_closure(&mut self, start: Span) -> PResult<Expr> {
+        self.bump(); // 开始的 `|`
+
+        let mut params = Vec::new();
+        loop {
+            self.split_or_to_bit_or();
+            if self.check(tok!(|)) {
+                break;
+            }
+            if self.at_eof() {
+                return Err(self.unexpected(&[Expected::Exact(tok!(|))]));
+            }
+
+            let param = self.parse_closure_param()?;
+            params.push(param);
+
+            if !self.eat(tok!(,)) {
+                break;
+            }
+        }
+
+        self.expect(tok!(|))?; // 结束的 `|`
+
+        let body = self.parse_expr_with_precedence(Precedence::Jump)?;
+        let span = start.extend(body.span);
+        Ok(self.mk_expr(ExprKind::Closure(params, Box::new(body)), span))
+    }
+
+    fn parse_closure_param(&mut self) -> PResult<ClosureParam> {
+        let name: Ident = self.parse()?;
+        let ty = if self.eat(tok!(:)) {
+            Some(self.parse::<Ty>()?)
+        } else {
+            None
+        };
+        Ok(ClosureParam { name, ty })
     }
 
     fn parse_let_expr(&mut self, base_span: Span) -> PResult<Expr> {
@@ -551,8 +644,13 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         Ok(self.mk_expr(ExprKind::Unary(op, Box::new(operand)), span))
     }
 
-    fn parse_ref_expr(&mut self, mutability: Mutability, span: Span) -> PResult<Expr> {
-        self.bump();
+    fn parse_ref_expr(&mut self, span: Span) -> PResult<Expr> {
+        self.bump(); // 消费 `&`
+        let mutability = if self.eat(tok!(mut)) {
+            Mutability::Mut
+        } else {
+            Mutability::Immut
+        };
         let operand = self.parse_expr_with_precedence(Precedence::Prefix)?;
         let span = span.extend(operand.span);
         Ok(self.mk_expr(ExprKind::AddressOf(mutability, Box::new(operand)), span))
@@ -568,6 +666,26 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
 impl Parse for Block {
     fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
-        todo!()
+        let start = ctx.expect(tok!(OpenBrace))?.span;
+
+        let mut stmts = vec![];
+
+        while !ctx.at_eof() && ctx.peek_kind() != tok!(CloseBrace) {
+            match ctx.parse() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(e) => match run_recovery(Stmt::recovery(), ctx) {
+                    RecoveryResult::Failed => return Err(e),
+                    RecoveryResult::Ok => {}
+                },
+            }
+        }
+
+        let end = ctx.expect(tok!(CloseBrace))?.span;
+
+        Ok(Block {
+            node_id: ctx.node_id(),
+            stmts: stmts,
+            span: start.extend(end),
+        })
     }
 }

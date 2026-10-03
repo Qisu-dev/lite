@@ -100,15 +100,14 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
     fn parse_attrs(&mut self) -> PResult<Vec<Attr>> {
         let mut attrs = Vec::new();
-        while self.check(tok!(#)) {
+        while self.check(tok!(@)) {
             attrs.push(self.parse_attr()?);
         }
         Ok(attrs)
     }
 
     fn parse_attr(&mut self) -> PResult<Attr> {
-        let start = self.expect(tok!(#))?.span;
-        self.expect(tok!(OpenBracket))?;
+        let start = self.expect(tok!(@))?.span;
         let path: Path = self.parse()?;
 
         let mut args = Vec::new();
@@ -122,12 +121,8 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             self.expect(tok!(CloseParen))?;
         }
 
-        let close = self.expect(tok!(CloseBracket))?.span;
-        Ok(Attr {
-            path,
-            args,
-            span: start.extend(close),
-        })
+        let span = start.extend(self.prev_span());
+        Ok(Attr { path, args, span })
     }
 
     fn parse_attr_arg(&mut self) -> PResult<AttrArg> {
@@ -355,7 +350,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         let name: Ident = self.parse()?;
         let generics = self.parse_generics()?;
         let where_clause = self.parse_where_clause()?;
-        let kind = self.parse_variant_data(true)?;
+        let kind = self.parse_variant_data(false)?;
 
         Ok(StructData {
             node_id: self.node_id(),

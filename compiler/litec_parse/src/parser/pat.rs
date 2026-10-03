@@ -199,7 +199,6 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         ))
     }
 
-    // ─── Range / Expr 模式 ────────────────────────────────
     /// 前缀 range：`..end` / `..=end`
     fn parse_pat_range_prefix(&mut self, start: Span) -> PResult<Pat> {
         let limits = self.parse_range_limits()?;
@@ -228,15 +227,19 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         Ok(self.mk_pat(PatKind::Expr(Box::new(first)), span))
     }
 
-    /// range 的右端——可选。遇到 `,` / `=>` / `|` / `)` / `]` / `}` 就停。
     fn parse_opt_pat_range_end(&mut self) -> PResult<Option<Box<Expr>>> {
-        if matches!(
-            self.peek_kind(),
-            tok!(,) | tok!(=>) | tok!(|) | tok!(CloseParen) | tok!(CloseBracket) | tok!(CloseBrace)
-        ) {
-            return Ok(None);
+        let mark = self.mark();
+        match self.parse_pat_expr() {
+            Ok(e) => Ok(Some(Box::new(e))),
+            Err(e) => {
+                if self.cursor != mark.cursor {
+                    Err(e)
+                } else {
+                    self.restore(mark);
+                    Ok(None)
+                }
+            }
         }
-        Ok(Some(Box::new(self.parse_pat_expr()?)))
     }
 
     fn parse_range_limits(&mut self) -> PResult<Spanned<RangeLimits>> {
