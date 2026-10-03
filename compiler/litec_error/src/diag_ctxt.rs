@@ -1,5 +1,8 @@
 use litec_span::SourceMap;
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::{Ref, RefCell},
+    sync::Arc,
+};
 
 use crate::{Diag, DiagLevel, ErrorGuaranteed};
 
@@ -35,7 +38,7 @@ impl DiagCtxt {
         ErrorGuaranteed::new()
     }
 
-    pub fn diags_count(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.diags.borrow().len()
     }
 
@@ -47,18 +50,47 @@ impl DiagCtxt {
         self.diags.borrow_mut().truncate(idx);
     }
 
-    pub fn flush(&self) {
-        let diags = self.diags.borrow_mut();
-        for diag in diags.clone().into_iter() {
-            eprintln!("{}", diag.render(&self.source_map));
+    /// 遍历所有诊断
+    pub fn diags(&self) -> Ref<'_, [Diag]> {
+        Ref::map(self.diags.borrow(), |v| v.as_slice())
+    }
+
+    /// 渲染成字符串
+    pub fn render_all(&self) -> String {
+        let diags = self.diags.borrow();
+        let mut out = String::new();
+        for d in diags.iter() {
+            out.push_str(&d.render(&self.source_map));
+            out.push('\n');
         }
+        out
+    }
+
+    /// 写入任意 `Write`——生产 / 自定义目标
+    pub fn write_to<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        for d in self.diags.borrow().iter() {
+            writeln!(w, "{}", d.render(&self.source_map))?;
+        }
+        Ok(())
+    }
+
+    /// 渲染并清空——Drop 时不再输出
+    pub fn take_render_all(&self) -> String {
+        let diags = self.diags.take();
+        let mut out = String::new();
+        for d in diags {
+            out.push_str(&d.render(&self.source_map));
+            out.push('\n');
+        }
+        out
     }
 }
 
-impl Drop for DiagCtxt {
-    fn drop(&mut self) {
-        for diag in self.diags.take() {
-            eprintln!("{}", diag.render(&self.source_map))
+impl std::fmt::Display for DiagCtxt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for d in self.diags.borrow().iter() {
+            writeln!(f, "{}", d.render(&self.source_map))?;
         }
+        Ok(())
     }
 }

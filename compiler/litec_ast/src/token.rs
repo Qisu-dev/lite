@@ -1,7 +1,7 @@
 use litec_span::{Span, Symbol};
 use traversable::{Traversable, TraversableMut};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Token {
     pub span: Span,
     pub kind: TokenKind,
@@ -10,11 +10,11 @@ pub struct Token {
 
 impl Token {
     pub fn new(kind: TokenKind, span: Span, text: Symbol) -> Self {
-        Token {
-            span: span,
-            kind: kind,
-            text: text,
-        }
+        Token { span, kind, text }
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.text.as_str()
     }
 }
 
@@ -176,8 +176,8 @@ pub enum TokenKind {
     Static,
     Union,
     Where,
+    Dyn,
 
-    Error,
     Eof,
 
     Whitespace,
@@ -205,6 +205,147 @@ impl TokenKind {
                 | TokenKind::DocBlockComment
                 | TokenKind::InnerDocLineComment
                 | TokenKind::InnerDocBlockComment
+        )
+    }
+
+    pub fn is_literal(self) -> bool {
+        matches!(self, TokenKind::Literal { .. })
+    }
+
+    pub fn describe(&self) -> &'static str {
+        match self {
+            TokenKind::Ident => "identifier",
+            TokenKind::Literal { .. } => "literal",
+            TokenKind::Underscore => "`_`",
+            TokenKind::Eof => "end of file",
+
+            TokenKind::Semi => "`;`",
+            TokenKind::Comma => "`,`",
+            TokenKind::Dot => "`.`",
+            TokenKind::PathAccess => "`::`",
+            TokenKind::OpenParen => "`(`",
+            TokenKind::CloseParen => "`)`",
+            TokenKind::OpenBrace => "`{`",
+            TokenKind::CloseBrace => "`}`",
+            TokenKind::OpenBracket => "`[`",
+            TokenKind::CloseBracket => "`]`",
+            TokenKind::At => "`@`",
+            TokenKind::Hash => "`#`",
+            TokenKind::Tilde => "`~`",
+            TokenKind::Question => "`?`",
+            TokenKind::Colon => "`:`",
+            TokenKind::Dollar => "`$`",
+            TokenKind::Assign => "`=`",
+            TokenKind::EqEq => "`==`",
+            TokenKind::NotEq => "`!=`",
+            TokenKind::Bang => "`!`",
+            TokenKind::Lt => "`<`",
+            TokenKind::Le => "`<=`",
+            TokenKind::Gt => "`>`",
+            TokenKind::Ge => "`>=`",
+            TokenKind::Minus => "`-`",
+            TokenKind::MinusEq => "`-=`",
+            TokenKind::MinusMinus => "`--`",
+            TokenKind::BitAnd => "`&`",
+            TokenKind::BitAndEq => "`&=`",
+            TokenKind::And => "`&&`",
+            TokenKind::BitOr => "`|`",
+            TokenKind::BitOrEq => "`|=`",
+            TokenKind::Or => "`||`",
+            TokenKind::Plus => "`+`",
+            TokenKind::PlusEq => "`+=`",
+            TokenKind::PlusPlus => "`++`",
+            TokenKind::Mul => "`*`",
+            TokenKind::MulEq => "`*=`",
+            TokenKind::Div => "`/`",
+            TokenKind::DivEq => "`/=`",
+            TokenKind::BitXor => "`^`",
+            TokenKind::BitXorEq => "`^=`",
+            TokenKind::Remainder => "`%`",
+            TokenKind::RemainderEq => "`%=`",
+            TokenKind::Arrow => "`->`",
+            TokenKind::FatArrow => "`=>`",
+            TokenKind::To => "`..`",
+            TokenKind::ToEq => "`..=`",
+            TokenKind::Ellipsis => "`...`",
+            TokenKind::Shl => "`<<`",
+            TokenKind::ShlEq => "`<<=`",
+            TokenKind::Shr => "`>>`",
+            TokenKind::ShrEq => "`>>=`",
+
+            TokenKind::Fn => "`fn`",
+            TokenKind::Let => "`let`",
+            TokenKind::If => "`if`",
+            TokenKind::Else => "`else`",
+            TokenKind::While => "`while`",
+            TokenKind::Return => "`return`",
+            TokenKind::True => "`true`",
+            TokenKind::False => "`false`",
+            TokenKind::In => "`in`",
+            TokenKind::Struct => "`struct`",
+            TokenKind::Loop => "`loop`",
+            TokenKind::Break => "`break`",
+            TokenKind::Continue => "`continue`",
+            TokenKind::Pub => "`pub`",
+            TokenKind::Priv => "`priv`",
+            TokenKind::Use => "`use`",
+            TokenKind::As => "`as`",
+            TokenKind::Extern => "`extern`",
+            TokenKind::Mut => "`mut`",
+            TokenKind::Mod => "`mod`",
+            TokenKind::Super => "`super`",
+            TokenKind::Crate => "`crate`",
+            TokenKind::SelfLower => "`self`",
+            TokenKind::SelfUpper => "`Self`",
+            TokenKind::Trait => "`trait`",
+            TokenKind::Type => "`type`",
+            TokenKind::Impl => "`impl`",
+            TokenKind::For => "`for`",
+            TokenKind::Match => "`match`",
+            TokenKind::Defer => "`defer`",
+            TokenKind::Enum => "`enum`",
+            TokenKind::Const => "`const`",
+            TokenKind::Static => "`static`",
+            TokenKind::Union => "`union`",
+            TokenKind::Where => "`where`",
+
+            TokenKind::Whitespace => "whitespace",
+            TokenKind::LineComment => "line comment",
+            TokenKind::BlockComment => "block comment",
+            TokenKind::DocLineComment => "doc comment",
+            TokenKind::DocBlockComment => "doc comment",
+            TokenKind::InnerDocLineComment => "inner doc comment",
+            TokenKind::InnerDocBlockComment => "inner doc comment",
+            TokenKind::DocComment => "doc comment",
+            TokenKind::Dyn => "`dyn`",
+        }
+    }
+
+    pub fn is_pat_expr_start(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Literal { .. }
+                | TokenKind::Ident
+                | TokenKind::SelfLower
+                | TokenKind::SelfUpper
+                | TokenKind::Crate
+                | TokenKind::Super
+                | TokenKind::PathAccess
+                | TokenKind::Minus
+                | TokenKind::OpenParen
+                | TokenKind::OpenBracket
+        )
+    }
+
+    pub fn is_path_start(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Ident
+                | TokenKind::SelfLower
+                | TokenKind::SelfUpper
+                | TokenKind::Crate
+                | TokenKind::Super
+                | TokenKind::PathAccess
         )
     }
 }
@@ -482,6 +623,9 @@ macro_rules! tok {
     (where) => {
         $crate::TokenKind::Where
     };
+    (dyn) => {
+        $crate::TokenKind::Dyn
+    };
     (Eof) => {
         $crate::TokenKind::Eof
     };
@@ -508,9 +652,6 @@ macro_rules! tok {
     };
     (Ident) => {
         $crate::TokenKind::Ident
-    };
-    (Literal) => {
-        $crate::TokenKind::Literal
     };
 }
 
@@ -582,4 +723,5 @@ pub struct Lit {
     pub kind: LiteralKind,
     pub value: Symbol,
     pub suffix: Option<Symbol>,
+    pub span: Span,
 }

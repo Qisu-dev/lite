@@ -6,7 +6,9 @@ members = [
     "compiler/litec_span",
     "compiler/litec_error",
     "compiler/litec_session",
-    "compiler/litec_macros", "compiler/litec_parse",
+    "compiler/litec_macros",
+    "compiler/litec_parse",
+    "cli/litec",
 ]
 
 [workspace.dependencies]
@@ -21,3 +23,5 @@ quote = "1.0.47"
 proc-macro2 = "1.0.107"
 stable-arena = "0.3.0"
 darling = "0.24.1"
+unicode-ident = "1.0.26"
+unicode-width = "0.2.2"

@@ -62,8 +62,8 @@ impl SourceFile {
 /// 全局源码管理器#[derive(Debug, Default)]
 #[derive(Debug)]
 pub struct SourceMap {
-    /// 内部加锁——外层 `Arc<SourceMap>` 共享不变。
-    /// `SourceFile` 一旦创建就不可变，所以用 `Arc` 共享。
+    /// 内部加锁——外层 `Arc<SourceMap>` 共享不变
+    /// `SourceFile` 一旦创建就不可变，所以用 `Arc` 共享
     files: RwLock<Vec<Arc<SourceFile>>>,
 }
 
@@ -74,17 +74,18 @@ impl SourceMap {
         }
     }
 
-    pub fn add_file(&self, path: PathBuf, content: impl Into<String>) -> FileId {
+    pub fn add_file(&self, path: impl Into<PathBuf>, content: impl Into<String>) -> FileId {
+        let path_buf = path.into();
         let mut files = self.files.write().unwrap();
 
         let id = FileId(files.len());
-        let name = path
+        let name = path_buf
             .file_name()
             .and_then(|os| os.to_str())
             .map(String::from)
-            .unwrap_or_else(|| path.to_string_lossy().to_string());
+            .unwrap_or_else(|| path_buf.to_string_lossy().to_string());
 
-        let file = Arc::new(SourceFile::new(name, path, content.into()));
+        let file = Arc::new(SourceFile::new(name, path_buf, content.into()));
         files.push(file);
         id
     }
@@ -98,7 +99,7 @@ impl SourceMap {
         Some(file.line_col(span.start))
     }
 
-    /// 返回 `String`——因为不能从锁守卫后借用。
+    /// 返回 `String`——因为不能从锁守卫后借用
     pub fn snippet(&self, span: &Span) -> Option<String> {
         let file = self.file(span.file_id)?;
         file.content.get(span.start..span.end).map(String::from)

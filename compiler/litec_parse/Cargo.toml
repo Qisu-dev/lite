@@ -1,5 +1,5 @@
 [package]
-name = "litec_parser"
+name = "litec_parse"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,5 +8,8 @@ litec_ast = { path = "../litec_ast" }
 litec_error = { path = "../litec_error" }
 litec_span = { path = "../litec_span" }
 litec_session = { path = "../litec_session" }
-unicode-ident = "1.0.26"
-unicode-width = "0.2.2"
+unicode-ident = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+expect-test = "1.5.1"

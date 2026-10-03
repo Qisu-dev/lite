@@ -7,11 +7,11 @@ use litec_ast::TokenKind;
 use litec_ast::token::Token;
 use litec_error::Diag;
 use litec_session::{SessOptions, Session, TargetTriple};
-use litec_span::{FileId, SourceMap, create_session_globals};
+use litec_span::{SourceMap, create_session_globals};
 
 use crate::lexer::Lexer;
 
-/// 每个测试独立构造 `SessionGlobals`——测试之间不互相影响。
+/// 每个测试独立构造 `SessionGlobals`——测试之间不互相影响
 fn with_session<F, R>(f: F) -> R
 where
     F: FnOnce(&Session) -> R,
@@ -20,6 +20,7 @@ where
 
     create_session_globals(Some(source_map.clone()), &[], || {
         let opts = SessOptions::new(
+            "test",
             TargetTriple::host().expect("unsupported host"),
             PathBuf::from("/"),
         );
@@ -60,7 +61,7 @@ fn lex_with_diags(src: &str) -> (Vec<Token>, Vec<Diag>) {
     })
 }
 
-/// 过滤 trivia（空白、注释）——大部分断言只关心"有意义的 token"。
+/// 过滤 trivia（空白、注释）——大部分断言只关心"有意义的 token"
 fn significant(toks: Vec<Token>) -> Vec<Token> {
     toks.into_iter()
         .filter(|t| {
@@ -78,7 +79,7 @@ fn significant(toks: Vec<Token>) -> Vec<Token> {
         .collect()
 }
 
-/// 断言无错误，返回 significant token（含 `Eof`）。
+/// 断言无错误，返回 significant token（含 `Eof`）
 fn lex_ok(src: &str) -> Vec<Token> {
     let (toks, diags) = lex_with_diags(src);
     assert!(
@@ -90,14 +91,14 @@ fn lex_ok(src: &str) -> Vec<Token> {
     significant(toks)
 }
 
-/// 断言有错误，返回诊断。
+/// 断言有错误，返回诊断
 fn lex_err(src: &str) -> Vec<Diag> {
     let (_, diags) = lex_with_diags(src);
     assert!(!diags.is_empty(), "expected diagnostics, got none");
     diags
 }
 
-/// 只取 `TokenKind` 列表（`significant` 后）——便于 `assert_eq!`。
+/// 只取 `TokenKind` 列表（`significant` 后）——便于 `assert_eq!`
 fn kinds(toks: &[Token]) -> Vec<TokenKind> {
     toks.iter().map(|t| t.kind).collect()
 }

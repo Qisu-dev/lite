@@ -6,10 +6,10 @@ use std::sync::Arc;
 use litec_error::{Diag, DiagCtxt, ErrorGuaranteed};
 use litec_span::{SourceMap, with_session_globals};
 
-pub use crate::options::SessOptions;
-pub use crate::target::TargetTriple;
+pub use crate::options::{OptLevel, SessOptions};
+pub use crate::target::{Arch, Os, TargetTriple};
 
-/// 一次编译会话。
+/// 一次编译会话
 /// [`Session`] **不是** TLS 里的 [`litec_span::SessionGlobals`]
 /// [`Session`] 是每次编译运行独立的上下文
 #[derive(Debug, Clone)]
@@ -25,14 +25,8 @@ pub struct Session {
 }
 
 impl Session {
-    /// 创建会话。要求 [`litec_span::SessionGlobals`] 已初始化。
+    /// 创建会话要求 [`litec_span::SessionGlobals`] 已初始化
     pub fn new(source_map: Arc<SourceMap>, opts: SessOptions) -> Self {
-        let source_map = with_session_globals(|sg| {
-            sg.source_map
-                .clone()
-                .expect("SessionGlobals.source_map not initialized")
-        });
-
         Session {
             opts,
             dcx: DiagCtxt::new(source_map.clone()),
@@ -61,7 +55,7 @@ impl Session {
     }
 
     pub fn error_count(&self) -> usize {
-        self.dcx.diags_count()
+        self.dcx.len()
     }
 
     pub fn take_diags(&self) -> Vec<Diag> {

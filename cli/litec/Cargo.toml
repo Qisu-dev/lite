@@ -1,0 +1,11 @@
+[package]
+name = "litec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+litec_ast = { path = "../../compiler/litec_ast" }
+litec_error = { path = "../../compiler/litec_error" }
+litec_parse = { path = "../../compiler/litec_parse" }
+litec_session = { path = "../../compiler/litec_session" }
+litec_span = { path = "../../compiler/litec_span" }

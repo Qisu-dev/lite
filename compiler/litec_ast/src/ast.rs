@@ -23,27 +23,27 @@ pub enum AttrArg {
     KeyValue { key: Ident, value: Box<AttrArg> },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Attr {
     pub path: Path,         // 属性名称（如 `derive`, `cfg`, `repr`）
     pub args: Vec<AttrArg>, // 参数列表，可以为空
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Crate {
     pub node_id: NodeId,
     pub items: Vec<Item>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
 pub enum Visibility {
     Public,
     Inherited,
 }
 
-#[derive(Debug, Clone)]
-pub struct Item<K = ItemKind> {
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub struct Item<K: Traversable + TraversableMut = ItemKind> {
     pub node_id: NodeId,
     pub attr: Vec<Attr>,
     pub visibility: Visibility,
@@ -51,7 +51,7 @@ pub struct Item<K = ItemKind> {
     pub kind: K,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum ItemKind {
     /// 一个函数声明
     /// 例如 `fn foo<T>() -> T`
@@ -93,7 +93,7 @@ pub enum ItemKind {
     Union(UnionData),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct StructData {
     pub node_id: NodeId,
     pub name: Ident,
@@ -102,7 +102,7 @@ pub struct StructData {
     pub kind: VariantData,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct UnionData {
     pub node_id: NodeId,
     pub name: Ident,
@@ -111,7 +111,7 @@ pub struct UnionData {
     pub kind: VariantData,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Enum {
     pub node_id: NodeId,
     pub name: Ident,
@@ -120,7 +120,7 @@ pub struct Enum {
     pub kind: Vec<Variant>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Variant {
     pub node_id: NodeId,
     pub ident: Ident,
@@ -128,14 +128,14 @@ pub struct Variant {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum VariantData {
     Struct(Vec<FieldData>),
     Tuple(Vec<Ty>),
     Unit,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct FieldData {
     pub node_id: NodeId,
     pub visibility: Visibility,
@@ -146,13 +146,13 @@ pub struct FieldData {
 
 pub type TraitItem = Item<TraitItemKind>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum TraitItemKind {
     Fn(FnSig),
     Ty(TypeAlias),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct AssociatedType {
     pub node_id: NodeId,
     pub name: Ident,
@@ -162,7 +162,7 @@ pub struct AssociatedType {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct AssociatedConstant {
     pub node_id: NodeId,
     pub name: Ident,
@@ -171,7 +171,7 @@ pub struct AssociatedConstant {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Impl {
     pub node_id: NodeId,
     pub generics: Generics,
@@ -183,14 +183,14 @@ pub struct Impl {
 
 pub type ImplItem = Item<ImplItemKind>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum ImplItemKind {
     Fn(Fn),
     Ty(AssociatedType),
     Const(AssociatedConstant),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct TypeAlias {
     pub node_id: NodeId,
     pub name: Ident,
@@ -199,20 +199,20 @@ pub struct TypeAlias {
     pub ty: Ty,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum Inline {
     Inline(Vec<Item>),
     External(Vec<Item>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Fn {
     pub node_id: NodeId,
     pub sig: FnSig,
     pub body: Option<Block>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct FnSig {
     pub name: Ident,
     pub generics: Generics,
@@ -222,7 +222,7 @@ pub struct FnSig {
     pub abi: Option<StrLit>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Extern {
     pub node_id: NodeId,
     pub abi: Option<Ident>,
@@ -231,7 +231,7 @@ pub struct Extern {
 
 pub type ExternItem = Item<ExternItemKind>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum ExternItemKind {
     Fn(Fn),
     Struct(StructData),
@@ -239,7 +239,7 @@ pub enum ExternItemKind {
     Union(UnionData),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct UseTree {
     pub node_id: NodeId,
     pub prefix: Path,
@@ -250,7 +250,7 @@ pub struct UseTree {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum UseTreeKind {
     /// 例如 `use foo;` `use foo as rename;`
     Simple(Option<Ident>),
@@ -264,14 +264,14 @@ pub enum UseTreeKind {
     Glob,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Param {
     pub node_id: NodeId,
     pub kind: ParamKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum ParamKind {
     Normal(Box<Pat>, Box<Ty>),
     /// 比如 `*self` `*mut self`
@@ -287,7 +287,7 @@ pub struct Block {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Field {
     pub node_id: NodeId,
     pub name: Ident,
@@ -317,10 +317,10 @@ pub enum ExprKind {
     Grouped(Box<Expr>),
     /// 普通赋值
     /// 比如 `x = 0;`
-    Assignment(Box<Expr>, Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
     /// 带运算符的赋值
     /// 比如 `x += 0;`
-    AssignmentWithOp(Box<Expr>, AssignOp, Box<Expr>),
+    AssignOp(Box<Expr>, AssignOp, Box<Expr>),
     /// 函数调用
     /// 例如 `foo(1, 2)`
     Call(Box<Expr>, Vec<Expr>),
@@ -365,8 +365,11 @@ pub enum ExprKind {
     /// 表现为 ()
     Unit,
     /// 取地址
-    /// 例如 `&foo`
-    AddressOf(Box<Expr>),
+    /// 例如 `&foo` `&mut foo`
+    AddressOf(Mutability, Box<Expr>),
+    /// 解引用
+    /// 例如 `*ptr`
+    Deref(Box<Expr>),
     /// 结构体初始化
     /// 例如 `Foo { foo }`
     StructExpr(StructExpr),
@@ -400,6 +403,15 @@ pub enum ExprKind {
     /// 一个try 表达式, 在类型Result为Err还有Option为None等的时候会直接返回
     /// 例如 `Result::Err(())?` `None?`
     Try(Box<Expr>),
+    /// 一个array表达式
+    /// 例如 `[1, 2, 3]`
+    Array(Vec<Expr>),
+    /// 一个重复的 array 的表达式
+    /// 例如 `[1; 10]`
+    ArrayRepeat(Box<Expr>, Box<Expr>),
+    /// 一个 let 表达式, 且它的类型是 bool
+    /// 例如 `let Point { x, y } = p`
+    Let(Box<Pat>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
@@ -451,6 +463,7 @@ pub enum StmtKind {
     Semi(Box<Expr>),
     Let(Box<Pat>, Option<Box<Ty>>, Option<Box<Expr>>),
     Defer(Box<Expr>),
+    Item(Box<Item>),
 }
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
@@ -463,7 +476,7 @@ pub struct Ty {
 #[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum TyKind {
     /// `std::vec::Vec<T>` `Foo`
-    Path { path: Path },
+    Path(Path),
 
     /// Never 类型 `!`
     Never,
@@ -471,26 +484,35 @@ pub enum TyKind {
     Unit,
 
     /// 原始指针：`*const T` / `*mut T`
-    Ptr { mutability: Mutability, ty: Box<Ty> },
+    Ptr(Mutability, Box<Ty>),
 
     /// 数组：`[T; 5]`
     Array {
         elem: Box<Ty>,
-        len: Box<Expr>, // 编译时常量表达式
+        len: ArrayLen, // 编译时常量表达式
     },
     /// 切片：`[T]`
-    Slice { elem: Box<Ty> },
+    Slice(Box<Ty>),
     /// 元组：`(T, U, V)`
-    Tuple { elems: Vec<Ty> },
+    Tuple(Vec<Ty>),
 
     /// `fn(i32) -> String`
-    FnPtr {
-        inputs: Vec<Ty>, // 参数类型列表
-        output: Box<Ty>, // 返回类型
-    },
+    FnPtr(Vec<Ty>, Option<Box<Ty>>),
 
     /// 自身类型 `Self`
     SelfTy,
+
+    /// `_` 推导类型
+    Infer,
+
+    /// 动态 object
+    Dyn(Vec<Path>),
+}
+
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub enum ArrayLen {
+    Infer,           // _
+    Expr(Box<Expr>), // 3, N, SIZE + 1
 }
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
@@ -498,6 +520,13 @@ pub struct Path {
     pub node_id: NodeId,
     pub segments: Vec<PathSegment>,
     pub span: Span,
+    pub qself: Option<Box<QSelf>>,
+}
+
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub struct QSelf {
+    pub ty: Box<Ty>,
+    pub trait_: Path,
 }
 
 impl ToString for Path {
@@ -536,12 +565,18 @@ pub struct GenericArgs {
 }
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
-pub enum GenericArg {
+pub struct GenericArg {
+    pub kind: GenericArgKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Traversable, TraversableMut)]
+pub enum GenericArgKind {
     Type(Box<Ty>),
     Const(Box<Expr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Generics {
     pub node_id: NodeId,
     pub params: Vec<Generic>,
@@ -562,7 +597,7 @@ impl Generics {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Generic {
     pub node_id: NodeId,
     pub name: Ident, // "T", "U"
@@ -570,21 +605,21 @@ pub struct Generic {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Bounds {
     pub node_id: NodeId,
     pub bounds: Vec<Path>, // Trait + Trait ...
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct WhereClause {
     pub node_id: NodeId,
     pub predicates: Vec<WherePredicate>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum WherePredicate {
     TypeBound {
         path: Path,     // 泛型参数路径（如 `T`）
@@ -621,6 +656,7 @@ impl Ident {
                 generic_args: None,
             }],
             span: self.span,
+            qself: None
         }
     }
 }
@@ -646,7 +682,7 @@ impl PartialEq for Ident {
 
 impl Eq for Ident {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum FnRetTy {
     Default(Span),
     Ty(Ty),
@@ -654,8 +690,8 @@ pub enum FnRetTy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
 pub enum Mutability {
-    Mutable,
-    Immutable,
+    Mut,
+    Immut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
@@ -766,8 +802,6 @@ pub type AssignOp = Spanned<AssignOpKind>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
 #[traverse(skip_self)]
 pub enum UnOp {
-    /// *
-    Deref,
     /// !
     Not,
     /// ~
@@ -799,7 +833,7 @@ pub struct StructExprField {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct StrLit {
     pub text: Symbol,
     pub span: Span,

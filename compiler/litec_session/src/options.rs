@@ -9,12 +9,14 @@ pub enum OptLevel {
     Speed,
 }
 
-/// 纯编译选项：来自 CLI / `lite.toml`。
+/// 纯编译选项：来自 CLI / `lite.toml`
 ///
-/// 这是**可克隆的纯数据**，不含任何运行时状态。
-/// 每次编译会话构造一次，之后只读。
+/// 这是**可克隆的纯数据**，不含任何运行时状态
+/// 每次编译会话构造一次，之后只读
 #[derive(Debug, Clone)]
 pub struct SessOptions {
+    /// crate名称
+    pub crate_name: String,
     /// 优化级别
     pub opt_level: OptLevel,
     /// 目标平台
@@ -30,8 +32,9 @@ pub struct SessOptions {
 }
 
 impl SessOptions {
-    pub fn new(target: TargetTriple, sysroot: PathBuf) -> Self {
+    pub fn new(crate_name: impl Into<String>, target: TargetTriple, sysroot: PathBuf) -> Self {
         Self {
+            crate_name: crate_name.into(),
             opt_level: OptLevel::None,
             target,
             sysroot,

@@ -1,11 +1,11 @@
-//! 目标平台描述。
+//! 目标平台描述
 //!
 //! 用 `Arch` + `Os` 两个枚举组合成 `TargetTriple`，
 
 use std::fmt;
 use std::str::FromStr;
 
-/// CPU 架构。
+/// CPU 架构
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Arch {
     X86_64,
@@ -14,11 +14,7 @@ pub enum Arch {
 }
 
 impl Arch {
-    pub const ALL: &'static [Arch] = &[
-        Arch::X86_64,
-        Arch::Aarch64,
-        Arch::Riscv64,
-    ];
+    pub const ALL: &'static [Arch] = &[Arch::X86_64, Arch::Aarch64, Arch::Riscv64];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -28,7 +24,7 @@ impl Arch {
         }
     }
 
-    /// 宿主架构。不支持的宿主返回 `None`。
+    /// 宿主架构不支持的宿主返回 `None`
     pub fn host() -> Option<Self> {
         match std::env::consts::ARCH {
             "x86_64" => Some(Arch::X86_64),
@@ -58,7 +54,7 @@ impl FromStr for Arch {
     }
 }
 
-/// 操作系统。
+/// 操作系统
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Os {
     Linux,
@@ -67,11 +63,7 @@ pub enum Os {
 }
 
 impl Os {
-    pub const ALL: &'static [Os] = &[
-        Os::Linux,
-        Os::Windows,
-        Os::Macos,
-    ];
+    pub const ALL: &'static [Os] = &[Os::Linux, Os::Windows, Os::Macos];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -81,7 +73,7 @@ impl Os {
         }
     }
 
-    /// 宿主 OS。不支持的宿主返回 `None`。
+    /// 宿主 OS不支持的宿主返回 `None`
     pub fn host() -> Option<Self> {
         match std::env::consts::OS {
             "linux" => Some(Os::Linux),
@@ -111,10 +103,10 @@ impl FromStr for Os {
     }
 }
 
-/// 目标平台：架构 + 操作系统。
+/// 目标平台：架构 + 操作系统
 ///
-/// 用 `Display` 输出简写形式，例如 `x86_64-linux`。
-/// 用 [`TargetTriple::to_llvm_triple`] 输出 LLVM 使用的标准三元组。
+/// 用 `Display` 输出简写形式，例如 `x86_64-linux`
+/// 用 [`TargetTriple::to_llvm_triple`] 输出 LLVM 使用的标准三元组
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TargetTriple {
     pub arch: Arch,
@@ -126,7 +118,7 @@ impl TargetTriple {
         TargetTriple { arch, os }
     }
 
-    /// 宿主平台。不支持的宿主返回 `None`。
+    /// 宿主平台不支持的宿主返回 `None`
     pub fn host() -> Option<Self> {
         Some(TargetTriple {
             arch: Arch::host()?,
@@ -134,23 +126,23 @@ impl TargetTriple {
         })
     }
 
-    /// LLVM 风格的标准三元组字符串。
+    /// LLVM 风格的标准三元组字符串
     ///
-    /// 支持的组合有具体映射；未列出的组合退化为 `arch-os`。
+    /// 支持的组合有具体映射；未列出的组合退化为 `arch-os`
     pub fn to_llvm_triple(self) -> String {
         match (self.arch, self.os) {
-            (Arch::X86_64,  Os::Linux)   => "x86_64-unknown-linux-gnu".into(),
-            (Arch::X86_64,  Os::Windows) => "x86_64-pc-windows-msvc".into(),
-            (Arch::X86_64,  Os::Macos)   => "x86_64-apple-darwin".into(),
-            (Arch::Aarch64, Os::Linux)   => "aarch64-unknown-linux-gnu".into(),
+            (Arch::X86_64, Os::Linux) => "x86_64-unknown-linux-gnu".into(),
+            (Arch::X86_64, Os::Windows) => "x86_64-pc-windows-msvc".into(),
+            (Arch::X86_64, Os::Macos) => "x86_64-apple-darwin".into(),
+            (Arch::Aarch64, Os::Linux) => "aarch64-unknown-linux-gnu".into(),
             (Arch::Aarch64, Os::Windows) => "aarch64-pc-windows-msvc".into(),
-            (Arch::Aarch64, Os::Macos)   => "aarch64-apple-darwin".into(),
-            (Arch::Riscv64, Os::Linux)   => "riscv64-unknown-linux-gnu".into(),
+            (Arch::Aarch64, Os::Macos) => "aarch64-apple-darwin".into(),
+            (Arch::Riscv64, Os::Linux) => "riscv64-unknown-linux-gnu".into(),
             _ => format!("{}-{}", self.arch.as_str(), self.os.as_str()),
         }
     }
 
-    /// 可执行文件后缀（含点），例如 `.exe`。
+    /// 可执行文件后缀（含点），例如 `.exe`
     pub fn exe_suffix(self) -> &'static str {
         match self.os {
             Os::Windows => ".exe",
@@ -158,7 +150,7 @@ impl TargetTriple {
         }
     }
 
-    /// 动态库后缀，例如 `.dll`。
+    /// 动态库后缀，例如 `.dll`
     pub fn dylib_suffix(self) -> &'static str {
         match self.os {
             Os::Windows => ".dll",

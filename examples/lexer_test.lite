@@ -1,0 +1,7 @@
+let a = 1;
+/// Docment
+// Comment
+//! InnerDocment
+/* Multil-line Comment */
+/** Multil-line docment */
+/*! Multil-line InnerDocment */

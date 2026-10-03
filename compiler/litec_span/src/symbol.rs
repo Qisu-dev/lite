@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use crate::with_session_globals;
 use litec_macros::symbols;
 use rustc_hash::FxBuildHasher;
@@ -54,7 +56,7 @@ impl ByteSymbol {
 }
 
 index_vec::define_index_type! {
-    pub struct SymbolIndex = u32;
+   pub struct SymbolIndex = u32;
     DEBUG_FORMAT = "SymbolIndex({})";
 }
 
@@ -170,6 +172,20 @@ symbols! {
     Empty {
         Empty: ""
     }
+    Symbols {
+        Gt: ">",
+        Lt: "<",
+        Ge: ">=",
+        Le: "<=",
+        Eq: "==",
+        Ne: "!=",
+        Assign: "=",
+        Plus: "+",
+        Minus: "-",
+        Mul: "*",
+        Div: "/",
+        BitOr: "|",
+    }
     Keywords {
         Let: "let",
         Const: "const",
@@ -203,3 +219,4 @@ symbols! {
 
 pub use sym::empty_generated::Empty;
 pub use sym::keywords_generated as kw;
+pub use sym::symbols_generated as symbols;

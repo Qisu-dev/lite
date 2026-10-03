@@ -23,7 +23,7 @@ pub mod util {
     }
 
     impl AssocOp {
-        pub fn from_token(token: &Token) -> Option<Self> {
+        pub fn from_token(token: Token) -> Option<Self> {
             use AssocOp::*;
             match token.kind {
                 TokenKind::Assign => Some(Assign),
@@ -122,5 +122,28 @@ pub mod util {
         Prefix,
         // paths, loops, function calls, array indexing, field expressions, method calls
         Unambiguous,
+    }
+
+    impl Precedence {
+        #[inline]
+        pub const fn next(self) -> Precedence {
+            match self {
+                Precedence::Jump => Precedence::Assign,
+                Precedence::Assign => Precedence::Range,
+                Precedence::Range => Precedence::LOr,
+                Precedence::LOr => Precedence::LAnd,
+                Precedence::LAnd => Precedence::Compare,
+                Precedence::Compare => Precedence::BitOr,
+                Precedence::BitOr => Precedence::BitXor,
+                Precedence::BitXor => Precedence::BitAnd,
+                Precedence::BitAnd => Precedence::Shift,
+                Precedence::Shift => Precedence::Sum,
+                Precedence::Sum => Precedence::Product,
+                Precedence::Product => Precedence::Cast,
+                Precedence::Cast => Precedence::Prefix,
+                Precedence::Prefix => Precedence::Unambiguous,
+                Precedence::Unambiguous => Precedence::Unambiguous,
+            }
+        }
     }
 }

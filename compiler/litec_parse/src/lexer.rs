@@ -199,13 +199,13 @@ impl<'a, 'src> Lexer<'a, 'src> {
         Ok(self.mk_tok(TokenKind::Literal { kind, suffix }))
     }
 
-    /// 从开引号后扫到匹配的结束引号。
+    /// 从开引号后扫到匹配的结束引号
     ///
     /// - `quote`：结束引号字符（`"` / `'` / `` ` ``）
     /// - `is_raw`：raw 模式——不处理转义、允许跨行
     /// - `check_ascii`：字节串/C 字符串——非 ASCII 报错
     ///
-    /// 返回：是否找到结束引号。
+    /// 返回：是否找到结束引号
     fn lex_str_literal_body(&mut self, quote: char, is_raw: bool, check_ascii: bool) -> bool {
         loop {
             match self.bump() {
@@ -238,7 +238,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
         }
     }
 
-    /// 判断当前位置是不是字面量的开头。不消费任何字符。
+    /// 判断当前位置是不是字面量的开头不消费任何字符
     fn peek_str_literal(&self) -> Option<LiteralKind> {
         let first = self.peek()?;
         let second = self.peek_n(1);
@@ -300,7 +300,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
         Ok(self.mk_tok(TokenKind::Literal { kind, suffix }))
     }
 
-    /// 扫描 `e10` / `E-5` 这样的指数。返回是否真的扫到了指数。
+    /// 扫描 `e10` / `E-5` 这样的指数返回是否真的扫到了指数
     fn lex_exponent(&mut self) -> bool {
         if !matches!(self.peek(), Some('e') | Some('E')) {
             return false;
@@ -313,7 +313,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
         true
     }
 
-    /// 扫描可选后缀：`i32`、`u64`、`f32` 等。
+    /// 扫描可选后缀：`i32`、`u64`、`f32` 等
     fn lex_suffix(&mut self) -> Option<Symbol> {
         let suffix_start = self.pos;
 
@@ -342,7 +342,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
             }
             _ => tok!(LineComment),
         };
-        self.bump_if(|c| c != '\n');
+        self.bump_if(|c| c != '\n' && c != '\r');
         kind
     }
 
@@ -550,6 +550,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
             "static" => tok!(static),
             "union" => tok!(union),
             "where" => tok!(where),
+            "dyn" => tok!(dyn),
 
             _ => tok!(Ident),
         };
@@ -557,10 +558,10 @@ impl<'a, 'src> Lexer<'a, 'src> {
         Ok(self.mk_tok(kind))
     }
 
-    /// 进入时：已消费 `/*`，`self.pos` 在第三个字符位置。
-    /// 返回：注释的 `TokenKind`（`BlockComment` / `DocBlockComment` / `InnerDocBlockComment`）。
+    /// 进入时：已消费 `/*`，`self.pos` 在第三个字符位置
+    /// 返回：注释的 `TokenKind`（`BlockComment` / `DocBlockComment` / `InnerDocBlockComment`）
     ///
-    /// 处理嵌套：所有块注释共享 `depth`，`/*` 加一，`*/` 减一。
+    /// 处理嵌套：所有块注释共享 `depth`，`/*` 加一，`*/` 减一
     fn lex_block_comment(&mut self) -> PResult<Token> {
         // 判断类型：/** 或 /*! 或 /*
         let kind = match self.peek() {
@@ -673,5 +674,31 @@ impl<'a, 'src> Lexer<'a, 'src> {
     pub(crate) fn restore(&mut self, cp: LexerCheckpoint) {
         self.pos = cp.pos;
         self.start = cp.start;
+    }
+}
+
+pub fn tokenize(session: &Session, src: &str, file_id: FileId) -> Vec<Token> {
+    let mut lexer = Lexer::new(session, src, file_id);
+    let mut tokens = Vec::new();
+
+    loop {
+        let before = lexer.pos;
+        match lexer.advance() {
+            Ok(t) => {
+                let is_eof = t.kind == tok!(Eof);
+                tokens.push(t);
+                if is_eof {
+                    return tokens;
+                }
+            }
+            Err(_) => {
+                if lexer.pos == before {
+                    debug_assert!(false, "advance returned Err without advancing");
+                    if lexer.bump().is_none() {
+                        return tokens;
+                    }
+                }
+            }
+        }
     }
 }
