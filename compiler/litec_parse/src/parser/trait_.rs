@@ -15,5 +15,5 @@ pub(crate) trait Parse: Sized {
         None
     }
 
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self>;
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self>;
 }

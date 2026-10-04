@@ -240,7 +240,7 @@ impl Diag {
 
     fn prepare(&self, source_map: &SourceMap) -> Option<Vec<SlicedSource>> {
         let source_file = source_map.file(self.span.file_id)?;
-        let path_str = source_file.path.to_str()?;
+        let path_str = source_map.display_path(self.span.file_id);
 
         let start_lc = source_file.line_col(self.span.start);
         let end_lc = source_file.line_col(self.span.end);
@@ -253,9 +253,35 @@ impl Diag {
             1
         };
 
+        // 计算显示范围：错误行 + 同文件 label + suggestion 的行
+        let mut min_line = error_start_line;
+        let mut max_line = error_end_line;
+
+        // 同文件 label
+        for label in &self.labels {
+            if label.span.file_id != self.span.file_id {
+                continue;
+            }
+            let s = source_file.line_col(label.span.start).0;
+            let e = source_file.line_col(label.span.end).0;
+            min_line = min_line.min(s);
+            max_line = max_line.max(e);
+        }
+
+        // suggestion
+        for sug in &self.suggestions {
+            if sug.span.file_id != self.span.file_id {
+                continue;
+            }
+            let s = source_file.line_col(sug.span.start).0;
+            let e = source_file.line_col(sug.span.end).0;
+            min_line = min_line.min(s);
+            max_line = max_line.max(e);
+        }
+
         let context = self.context_lines.context_size();
-        let display_start = error_start_line.saturating_sub(context);
-        let display_end = (error_end_line + context).min(total_lines.saturating_sub(1));
+        let display_start = min_line.saturating_sub(context);
+        let display_end = (max_line + context).min(total_lines.saturating_sub(1));
 
         let main_sliced = self.extract_lines(
             &source_file.content,
@@ -273,7 +299,7 @@ impl Diag {
             path: path_str.to_string(),
         }];
 
-        // 跨文件 label
+        // ─── 跨文件 label —— 独立切片 ───
         for label in &self.labels {
             if label.span.file_id == self.span.file_id {
                 continue;
@@ -288,9 +314,15 @@ impl Diag {
             let label_start = label_file.line_col(label.span.start);
             let label_end = label_file.line_col(label.span.end);
 
+            let label_total_lines = if label_file.line_offsets.len() > 1 {
+                label_file.line_offsets.len() - 1
+            } else {
+                1
+            };
+
             let label_display_start = label_start.0.saturating_sub(context);
             let label_display_end =
-                (label_end.0 + context).min(label_file.line_offsets.len().saturating_sub(2));
+                (label_end.0 + context).min(label_total_lines.saturating_sub(1));
 
             let label_slice = self.extract_lines(
                 &label_file.content,
@@ -312,32 +344,6 @@ impl Diag {
         Some(sources)
     }
 
-    fn extract_lines(
-        &self,
-        source: &str,
-        start_line: usize,
-        end_line: usize,
-        error_start_line: usize,
-        error_end_line: usize,
-    ) -> String {
-        match self.fold_empty {
-            FoldEmptyLines::Keep => extract_lines_preserve_empty(source, start_line, end_line),
-            FoldEmptyLines::Fold {
-                context_empty,
-                marker,
-            } => extract_lines_fold_empty(
-                source,
-                start_line,
-                end_line,
-                error_start_line,
-                error_end_line,
-                context_empty,
-                marker,
-            ),
-            FoldEmptyLines::Remove => extract_lines_remove_empty(source, start_line, end_line),
-        }
-    }
-
     fn build_report<'a>(
         &'a self,
         sources: &'a [SlicedSource],
@@ -345,6 +351,7 @@ impl Diag {
     ) -> Option<Vec<Group<'a>>> {
         let main_source = sources.first()?;
         let content_len = main_source.content.len();
+        let slice_end_abs = main_source.base_offset + content_len;
 
         let (main_start, main_end) = self.adjust_span(self.span, main_source, content_len);
 
@@ -383,7 +390,7 @@ impl Diag {
 
         let mut groups = vec![main_group];
 
-        // 跨文件 label
+        // ─── 跨文件 label ───
         let mut source_idx = 1;
         for label in &self.labels {
             if label.span.file_id == self.span.file_id {
@@ -406,7 +413,7 @@ impl Diag {
             groups.push(Group::with_title(label_title).element(label_snippet));
         }
 
-        // suggestion
+        // ─── suggestion ───
         for sug in &self.suggestions {
             if sug.span.file_id != self.span.file_id {
                 continue;
@@ -416,37 +423,48 @@ impl Diag {
                 continue;
             };
 
-            let (line, _) = source_file.line_col(sug.span.start);
+            let content = &source_file.content;
+            let abs_start = sug.span.start as usize;
+            let abs_end = sug.span.end as usize;
 
-            let line_start = source_file.line_offsets[line - 1];
-            let line_end = source_file
-                .line_offsets
-                .get(line)
-                .copied()
-                .unwrap_or(source_file.content.len());
+            // 越界保护
+            if abs_start > content.len() || abs_end > content.len() || abs_start > abs_end {
+                continue;
+            }
 
-            let line_text = source_file.content[line_start as usize..line_end as usize]
-                .trim_end_matches('\n')
-                .trim_end_matches('\r');
+            // 字符边界保护（多字节字符）
+            if !content.is_char_boundary(abs_start) || !content.is_char_boundary(abs_end) {
+                continue;
+            }
 
-            let whole_line_start = line_start.saturating_sub(main_source.base_offset) as usize;
-            let whole_line_end = (line_start + line_text.len())
-                .saturating_sub(main_source.base_offset)
-                .min(content_len) as usize;
+            // 按字节找行边界——不依赖 line_offsets
+            let line_start = content[..abs_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_end_raw = content[abs_end..]
+                .find('\n')
+                .map(|i| abs_end + i)
+                .unwrap_or(content.len());
 
-            let rel_start = (sug.span.start - line_start) as usize;
-            let rel_end = (sug.span.end - line_start) as usize;
+            // span 必须落在 main_source 切片范围内（prepare 已保证，防御性再查）
+            if line_start < main_source.base_offset || line_end_raw > slice_end_abs {
+                continue;
+            }
+
+            // 构造新行：span 之前的行内内容 + replacement + span 之后的行内内容
             let new_line = format!(
                 "{}{}{}",
-                &line_text[..rel_start],
+                &content[line_start..abs_start],
                 sug.replacement,
-                &line_text[rel_end..],
+                &content[abs_end..line_end_raw],
             );
+
+            // 转成相对 main_source.content 的偏移
+            let rel_line_start = line_start - main_source.base_offset;
+            let rel_line_end = line_end_raw - main_source.base_offset;
 
             let sug_snippet = Snippet::source(&main_source.content)
                 .path(&main_source.path)
                 .line_start(main_source.start_line + 1)
-                .patch(Patch::new(whole_line_start..whole_line_end, new_line));
+                .patch(Patch::new(rel_line_start..rel_line_end, new_line));
 
             let sug_group = Group::with_title(Level::HELP.primary_title(sug.description.as_str()))
                 .element(sug_snippet);
@@ -483,6 +501,32 @@ impl Diag {
             .map(|c| format!("[{}] ", c))
             .unwrap_or_default();
         format!("{}: {}{}", level_str, code_str, self.message)
+    }
+
+    fn extract_lines(
+        &self,
+        source: &str,
+        start_line: usize,
+        end_line: usize,
+        error_start_line: usize,
+        error_end_line: usize,
+    ) -> String {
+        match self.fold_empty {
+            FoldEmptyLines::Keep => extract_lines_preserve_empty(source, start_line, end_line),
+            FoldEmptyLines::Fold {
+                context_empty,
+                marker,
+            } => extract_lines_fold_empty(
+                source,
+                start_line,
+                end_line,
+                error_start_line,
+                error_end_line,
+                context_empty,
+                marker,
+            ),
+            FoldEmptyLines::Remove => extract_lines_remove_empty(source, start_line, end_line),
+        }
     }
 }
 

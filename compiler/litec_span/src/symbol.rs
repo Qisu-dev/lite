@@ -6,14 +6,27 @@ use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap;
 use stable_arena::DroplessArena;
 use std::collections::hash_map::Entry;
+use std::fmt::Display;
 use std::sync::RwLock;
 use traversable::Traversable;
 use traversable::TraversableMut;
 
 #[repr(transparent)]
-#[derive(Traversable, TraversableMut, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Traversable, TraversableMut, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[traverse(skip_self)]
 pub struct Symbol(#[traverse(skip)] SymbolIndex);
+
+impl Display for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::fmt::Debug for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl Symbol {
     pub const fn new(n: u32) -> Self {

@@ -11,21 +11,22 @@ litec —— Lite 编译器
   litec [子命令] [key=value ...]
 
 子命令: 
-  build        编译（默认）
+  build        编译
   lex          只输出 token
+  ast          只输出 ast
   help         显示本帮助
   version      显示版本
 
 参数: 
   file=<p>[,<p>...]        输入文件（必需，逗号分隔）
   output=<p>               输出路径
-  target=<triple>          目标平台（默认宿主）
-  opt=<0|1|2|3|s|z>        优化级别（默认 0）
+  target=<triple>          目标平台(默认宿主)
+  opt=<0|1|2|3|s|z>        优化级别(默认 0)
   sysroot=<p>              标准库根目录
-  crate_name=<name>        crate 名（默认从文件名推）
+  crate_name=<name>        crate 名(默认从文件名推)
   debug_info=<bool>        生成调试信息
   emit_llvm_ir=<bool>      输出 LLVM IR
-  json=<bool>              JSON 诊断
+  pretty=<bool>            ast 输出用详细格式(默认紧凑)
 
 示例: 
   litec file=main.lite
@@ -46,14 +47,14 @@ pub struct Cli {
     pub crate_name: Option<String>,
     pub debug_info: bool,
     pub emit_llvm_ir: bool,
-    pub json_diagnostics: bool,
-    pub display_tokens: bool,
+    pub pretty: bool,
 }
 
 #[derive(Debug)]
 pub enum Command {
     Build,
     Lex,
+    Ast,
     Help,
     Version,
 }
@@ -72,12 +73,13 @@ impl Cli {
         // 收集到 Vec——参数顺序无所谓
         let args: Vec<String> = args.into_iter().collect();
 
-        // 子命令（第一个非 key=value 参数）
+        // 子命令
         let (command, rest) = match args.first() {
             Some(s) if !s.contains('=') => {
                 let cmd = match s.as_str() {
                     "build" => Command::Build,
                     "lex" => Command::Lex,
+                    "ast" => Command::Ast,
                     "help" | "--help" | "-h" => Command::Help,
                     "version" | "--version" | "-V" => Command::Version,
                     _ => return Err(CliError(format!("未知子命令: `{s}`"))),
@@ -99,8 +101,7 @@ impl Cli {
                 crate_name: None,
                 debug_info: false,
                 emit_llvm_ir: false,
-                json_diagnostics: false,
-                display_tokens: false,
+                pretty: false,
             });
         }
 
@@ -113,8 +114,7 @@ impl Cli {
         let mut crate_name = None;
         let mut debug_info = false;
         let mut emit_llvm_ir = false;
-        let mut json_diagnostics = false;
-        let mut display_tokens = false;
+        let mut pretty = true;
 
         for arg in rest {
             let (key, value) = arg
@@ -137,8 +137,7 @@ impl Cli {
                 "crate_name" => crate_name = Some(value.into()),
                 "debug_info" => debug_info = parse_bool(value)?,
                 "emit_llvm_ir" => emit_llvm_ir = parse_bool(value)?,
-                "json" => json_diagnostics = parse_bool(value)?,
-                "display_tokens" => display_tokens = parse_bool(value)?,
+                "pretty" => pretty = parse_bool(value)?,
                 _ => return Err(CliError(format!("未知参数: `{key}`"))),
             }
         }
@@ -169,8 +168,7 @@ impl Cli {
             crate_name,
             debug_info,
             emit_llvm_ir,
-            json_diagnostics,
-            display_tokens,
+            pretty,
         })
     }
 }

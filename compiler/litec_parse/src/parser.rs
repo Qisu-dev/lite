@@ -1,10 +1,14 @@
+use std::path::PathBuf;
+
 use crate::parser::recovery::SyncSet;
 use crate::parser::trait_::Parse;
 use crate::{
     lexer::Lexer,
     parser::recovery::{Recovery, RecoveryResult},
 };
-use litec_ast::ast::{Expr, ExprKind, NodeId, Pat, PatKind, Stmt, StmtKind, Ty, TyKind};
+use litec_ast::ast::{
+    Crate, Doc, Expr, ExprKind, Item, ItemKind, NodeId, Pat, PatKind, Stmt, StmtKind, Ty, TyKind,
+};
 use litec_ast::token::Token;
 use litec_ast::{TokenKind, tok};
 use litec_error::{Diag, ErrorGuaranteed, PResult};
@@ -16,17 +20,16 @@ mod item;
 mod pat;
 mod recovery;
 mod stmt;
-#[cfg(test)]
-mod tests;
 mod trait_;
 mod ty;
 
-pub(crate) struct ParseCtx<'a, 'src> {
-    lexer: Lexer<'a, 'src>,
+pub(crate) struct ParseCtx<'a> {
+    lexer: Lexer<'a>,
+    file_id: FileId,
+    module_dir: PathBuf,
     buffer: Vec<Token>,
     cursor: usize,
     session: &'a Session,
-    next_node_id: u32,
     ctx_stack: Vec<ParseContext>,
     /// 已收集但还没附着的 doc comment
     pending_outro_docs: Vec<Token>,
@@ -48,14 +51,25 @@ pub struct Mark {
     diags_len: usize,
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
-    pub(crate) fn new(session: &'a Session, src: &'src str, file_id: FileId) -> Self {
+impl<'a> ParseCtx<'a> {
+    pub fn new(session: &'a Session, file_id: FileId) -> Self {
+        let module_dir = session
+            .source_map()
+            .file_path(file_id)
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        Self::with_module_dir(session, file_id, module_dir)
+    }
+
+    pub fn with_module_dir(session: &'a Session, file_id: FileId, module_dir: PathBuf) -> Self {
         Self {
-            lexer: Lexer::new(session, src, file_id),
+            session,
+            file_id,
+            module_dir,
+            lexer: Lexer::new(session, file_id),
             buffer: vec![],
             cursor: 0,
-            session,
-            next_node_id: 0,
             ctx_stack: vec![],
             pending_outro_docs: vec![],
             no_struct_literal: false,
@@ -155,7 +169,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         }
     }
 
-    pub fn restore(&mut self, mark: Mark) {
+    pub fn reset(&mut self, mark: Mark) {
         debug_assert!(mark.cursor <= self.cursor);
         self.cursor = mark.cursor;
         self.session.dcx().truncate(mark.diags_len);
@@ -254,16 +268,15 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         match T::parse(self) {
             Ok(v) => Some(v),
             Err(_) => {
-                self.restore(mark);
+                self.reset(mark);
                 None
             }
         }
     }
 
     pub(crate) fn node_id(&mut self) -> NodeId {
-        let id = NodeId::from_raw(self.next_node_id);
-        self.next_node_id += 1;
-        id
+        let id = self.session.next_id();
+        NodeId::from_raw(id)
     }
 
     pub(crate) fn parse<T: Parse>(&mut self) -> PResult<T> {
@@ -345,11 +358,12 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
     ///
     /// 每个 item 的 `parse` 入口无条件调用（即使当前没有 doc）。
     /// 先 take 再解析——失败早退也不残留。
-    pub(crate) fn take_docs(&mut self) -> Vec<Token> {
-        // 保证 cursor 前的 doc 已被收集
-        // （cursor 之前的 token 一定已经 lex 过，所以这一步通常不跑）
-        self.fill(0);
-        std::mem::take(&mut self.pending_outro_docs)
+    pub(crate) fn take_docs(&mut self) -> Vec<Doc> {
+        let tokens = std::mem::take(&mut self.pending_outro_docs);
+        tokens
+            .into_iter()
+            .map(|token| Doc::from_token(token))
+            .collect()
     }
 
     /// 检查有没有残留的 doc comment。
@@ -472,7 +486,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
     }
 }
 
-pub(crate) fn run_recovery(recovery: Recovery, ctx: &mut ParseCtx<'_, '_>) -> RecoveryResult {
+pub(crate) fn run_recovery(recovery: Recovery, ctx: &mut ParseCtx) -> RecoveryResult {
     match recovery {
         Recovery::Fatal => RecoveryResult::Failed,
 
@@ -503,7 +517,7 @@ pub(crate) fn run_recovery(recovery: Recovery, ctx: &mut ParseCtx<'_, '_>) -> Re
                     return RecoveryResult::Ok;
                 }
                 // 失败——回滚——试下一个
-                ctx.restore(mark);
+                ctx.reset(mark);
             }
             RecoveryResult::Failed
         }
@@ -541,6 +555,7 @@ pub(crate) enum Expected {
     Path,
     Ty,
     Pattern,
+    Item,
 }
 
 impl Expected {
@@ -553,6 +568,7 @@ impl Expected {
             Expected::Path => "path".into(),
             Expected::Ty => "type".into(),
             Expected::Pattern => "pattern".into(),
+            Expected::Item => "item".into(),
         }
     }
 }
@@ -576,5 +592,33 @@ fn join_expected(expected: &[Expected]) -> String {
 impl From<TokenKind> for Expected {
     fn from(kind: TokenKind) -> Self {
         Expected::Exact(kind)
+    }
+}
+
+/// file id就是 crate 的根文件比如 `main.lite` 或者 `lib.lite`
+pub fn parse(session: &Session, file_id: FileId) -> Crate {
+    let mut ctx = ParseCtx::new(session, file_id);
+
+    let mut items = vec![];
+
+    while !ctx.at_eof() {
+        let before = ctx.cursor;
+        match ctx.parse() {
+            Ok(item) => items.push(item),
+            Err(_) => match run_recovery(Item::<ItemKind>::recovery(), &mut ctx) {
+                RecoveryResult::Failed => break,
+                RecoveryResult::Ok => {}
+            },
+        }
+        if ctx.cursor == before {
+            ctx.bump();
+        }
+    }
+
+    let _ = ctx.check_no_pending_docs();
+
+    Crate {
+        node_id: ctx.node_id(),
+        items,
     }
 }

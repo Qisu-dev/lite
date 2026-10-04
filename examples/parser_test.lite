@@ -1,0 +1,5 @@
+mod extern_module;
+
+fn main() {
+
+}

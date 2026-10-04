@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 litec_span = { path = "../litec_span" }
 index_vec = { workspace = true }
-serde = { workspace = true }
 traversable = { workspace = true }

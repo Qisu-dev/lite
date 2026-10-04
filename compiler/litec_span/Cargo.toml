@@ -10,3 +10,4 @@ rustc-hash = { workspace = true }
 litec_macros = { path = "../litec_macros" }
 stable-arena = { workspace = true }
 index_vec = { workspace = true }
+dunce = "1.0.5"

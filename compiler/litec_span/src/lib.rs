@@ -6,6 +6,7 @@ pub use file::{FileId, SourceFile, SourceMap};
 use std::{ops::Range, sync::Arc};
 pub use symbol::Symbol;
 pub use symbol::{kw, symbols};
+pub use file::display_path;
 use traversable::{Traversable, TraversableMut};
 
 #[derive(Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
@@ -19,7 +20,11 @@ pub struct Span {
 
 impl std::fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}..{}", self.start, self.end)
+        if *self == DUMMY_SPAN {
+            write!(f, "<dummy_span>")
+        } else {
+            write!(f, "{}..{}", self.start, self.end)
+        }
     }
 }
 

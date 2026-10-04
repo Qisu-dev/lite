@@ -1,0 +1,119 @@
+@inline
+pub fn main() -> i32 {
+    let x: i32 = 1;
+    let mut y = 2;
+    
+    if x > y {
+        return x;
+    } else if x < y {
+        return y;
+    } else {
+        return 0;
+    }
+}
+
+struct Point {
+    pub x: i32,
+    y: i32,
+}
+
+struct Pair(i32, i32);
+
+struct Marker;
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+enum Shape {
+    Circle(f64),
+    Rect { w: f64, h: f64 },
+}
+
+trait Display {
+    type Output;
+    fn fmt(self) -> i32;
+}
+
+impl Point {
+    fn new(x: i32, y: i32) -> i32 {
+        Point { x, y }
+    }
+}
+
+impl Display for Point {
+    type Output = i32;
+    fn fmt(self) -> i32 {
+        self.x
+    }
+}
+
+const MAX: i32 = 100;
+static X: i32 = 1;
+type MyInt = i32;
+
+mod inline_mod {
+    fn nested() {}
+}
+
+use foo::bar;
+use foo::{a, b};
+use foo::*;
+
+fn control_flow() {
+    let x = 1;
+    
+    while x < 10 {
+        break;
+    }
+    
+    loop {
+        break;
+    }
+    
+    for i in 0..10 {
+        continue;
+    }
+    
+    match x {
+        0 => 1,
+        1 => 2,
+        _ => 3,
+    };
+    
+    let y = || 1;
+    let z = |a| a + 1;
+    
+    let arr = [1, 2, 3];
+    let repeat = [0; 4];
+    
+    let tup = (1, 2, 3);
+    let unit = ();
+    
+    let p: *mut i32 = &mut x;
+    let q: *i32 = &x;
+    let d = *p;
+    
+    defer cleanup();
+}
+
+fn types() {
+    let a: i32 = 1;
+    let b: *i32 = &a;
+    let c: [i32; 4] = [1, 2, 3, 4];
+    let d: (i32, u8) = (1, 2);
+    let e: fn(i32) -> i32 = f;
+    let g: *dyn Display = &a;
+}
+
+fn literals() {
+    let a = 42;
+    let b = 3.14;
+    let c = "hello";
+    let d = 'x';
+    let e = true;
+    let f = false;
+}
+a

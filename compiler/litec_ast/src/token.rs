@@ -212,7 +212,7 @@ impl TokenKind {
         matches!(self, TokenKind::Literal { .. })
     }
 
-    pub fn describe(&self) -> &'static str {
+    pub fn describe(self) -> &'static str {
         match self {
             TokenKind::Ident => "identifier",
             TokenKind::Literal { .. } => "literal",
@@ -321,7 +321,7 @@ impl TokenKind {
         }
     }
 
-    pub fn is_pat_expr_start(&self) -> bool {
+    pub fn is_pat_expr_start(self) -> bool {
         matches!(
             self,
             TokenKind::Literal { .. }
@@ -337,7 +337,7 @@ impl TokenKind {
         )
     }
 
-    pub fn is_path_start(&self) -> bool {
+    pub fn is_path_start(self) -> bool {
         matches!(
             self,
             TokenKind::Ident
@@ -346,6 +346,26 @@ impl TokenKind {
                 | TokenKind::Crate
                 | TokenKind::Super
                 | TokenKind::PathAccess
+        )
+    }
+
+    pub fn is_item_start(self) -> bool {
+        matches!(
+            self,
+            TokenKind::Fn
+                | TokenKind::Struct
+                | TokenKind::Enum
+                | TokenKind::Trait
+                | TokenKind::Impl
+                | TokenKind::Mod
+                | TokenKind::Use
+                | TokenKind::Const
+                | TokenKind::Static
+                | TokenKind::Type
+                | TokenKind::Union
+                | TokenKind::Extern
+                | TokenKind::Pub
+                | TokenKind::Priv
         )
     }
 }

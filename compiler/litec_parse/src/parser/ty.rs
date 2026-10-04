@@ -65,12 +65,12 @@ impl Parse for GenericArg {
 }
 
 impl Parse for Ty {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_ty()
     }
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
+impl ParseCtx<'_> {
     pub(crate) fn parse_ty(&mut self) -> PResult<Ty> {
         match self.peek_kind() {
             tok!(OpenParen) => self.parse_ty_tuple(),
@@ -109,14 +109,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             }
 
             _ => Err(self.unexpected(&[
-                Expected::Exact(tok!(OpenParen)),
-                Expected::Exact(tok!(OpenBracket)),
-                Expected::Exact(tok!(&)),
-                Expected::Exact(tok!(*)),
-                Expected::Exact(tok!(fn)),
-                Expected::Exact(tok!(!)),
-                Expected::Exact(tok!(_)),
-                Expected::Path,
+                Expected::Ty
             ])),
         }
     }

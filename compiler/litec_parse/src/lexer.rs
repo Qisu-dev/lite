@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use litec_ast::{
     TokenKind, tok,
     token::{LiteralKind, Radix, Token},
@@ -73,12 +75,12 @@ fn is_digit_for_radix(c: char, base: Radix) -> bool {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Lexer<'a, 'src> {
+pub(crate) struct Lexer<'a> {
     /// 编译谈话
     /// 可以获取 dcx
     session: &'a Session,
     /// 读的源代码
-    src: &'src str,
+    src: Arc<str>,
     /// 已经读到的 **字节长度**
     pos: usize,
     /// 文件id, 用于生成span
@@ -87,14 +89,9 @@ pub(crate) struct Lexer<'a, 'src> {
     start: usize,
 }
 
-#[derive(Clone, Copy)]
-pub struct LexerCheckpoint {
-    pos: usize,
-    start: usize,
-}
-
-impl<'a, 'src> Lexer<'a, 'src> {
-    pub fn new(session: &'a Session, src: &'src str, file_id: FileId) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(session: &'a Session, file_id: FileId) -> Self {
+        let src = session.source_map().file(file_id).unwrap().content.clone();
         Self {
             session,
             src,
@@ -655,7 +652,7 @@ impl<'a, 'src> Lexer<'a, 'src> {
     }
 
     #[inline]
-    fn rest(&self) -> &'src str {
+    fn rest(&self) -> &str {
         &self.src[self.pos..]
     }
 
@@ -663,22 +660,10 @@ impl<'a, 'src> Lexer<'a, 'src> {
     fn is_eof(&self) -> bool {
         self.rest().is_empty()
     }
-
-    pub(crate) fn checkpoint(&self) -> LexerCheckpoint {
-        LexerCheckpoint {
-            pos: self.pos,
-            start: self.start,
-        }
-    }
-
-    pub(crate) fn restore(&mut self, cp: LexerCheckpoint) {
-        self.pos = cp.pos;
-        self.start = cp.start;
-    }
 }
 
-pub fn tokenize(session: &Session, src: &str, file_id: FileId) -> Vec<Token> {
-    let mut lexer = Lexer::new(session, src, file_id);
+pub fn tokenize(session: &Session, file_id: FileId) -> Vec<Token> {
+    let mut lexer = Lexer::new(session, file_id);
     let mut tokens = Vec::new();
 
     loop {

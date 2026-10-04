@@ -1,15 +1,29 @@
+#![allow(deprecated)]
+
+use std::fmt::Display;
+
 use crate::{
-    token::{self},
+    TokenKind,
+    token::{self, Token},
     util::{Fixity, Precedence},
 };
 use litec_span::{DUMMY_SPAN, Span, Spanned, Symbol};
-use serde::{Deserialize, Serialize};
 use traversable::{Traversable, TraversableMut};
 
 index_vec::define_index_type! {
     #[derive(Traversable, TraversableMut)] #[traverse(skip_self)] pub struct NodeId = u32;
     DEBUG_FORMAT = "Node({})";
 }
+
+impl Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if *self == DUMMY_NODE_ID {
+            write!(f, "<dummy_node_id>")
+        } else {
+            write!(f, "{}", self)
+        }
+    }
+} 
 
 pub const DUMMY_NODE_ID: NodeId = NodeId::from_raw_unchecked(u32::MAX);
 
@@ -43,7 +57,61 @@ pub enum Visibility {
 }
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
+pub struct Doc {
+    pub kind: DocKind,
+    pub text: Symbol, // 剥掉 `///` / `/** */` 后的文本
+    pub span: Span,   // 原始 token 的 span
+}
+
+impl Doc {
+    pub fn from_token(tok: Token) -> Self {
+        let kind = match tok.kind {
+            TokenKind::DocLineComment => DocKind::Line,
+            TokenKind::DocBlockComment => DocKind::Block,
+            TokenKind::InnerDocLineComment => DocKind::InnerLine,
+            TokenKind::InnerDocBlockComment => DocKind::InnerBlock,
+            _ => unreachable!("not a doc comment"),
+        };
+
+        let raw = tok.text.as_str();
+        let stripped = match kind {
+            DocKind::Line => raw.strip_prefix("///").unwrap_or(raw).trim(),
+            DocKind::InnerLine => raw.strip_prefix("//!").unwrap_or(raw).trim(),
+            DocKind::Block => raw
+                .strip_prefix("/**")
+                .unwrap_or(raw)
+                .strip_suffix("*/")
+                .unwrap_or(raw)
+                .trim(),
+            DocKind::InnerBlock => raw
+                .strip_prefix("/*!")
+                .unwrap_or(raw)
+                .strip_suffix("*/")
+                .unwrap_or(raw)
+                .trim(),
+        };
+
+        let text = Symbol::intern(stripped);
+
+        Doc {
+            kind,
+            text,
+            span: tok.span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Traversable, TraversableMut)]
+pub enum DocKind {
+    Line,       // ///
+    Block,      // /** */
+    InnerLine,  // //!
+    InnerBlock, // /*! */
+}
+
+#[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct Item<K: Traversable + TraversableMut = ItemKind> {
+    pub docs: Vec<Doc>,
     pub node_id: NodeId,
     pub attr: Vec<Attr>,
     pub visibility: Visibility,
@@ -148,7 +216,7 @@ pub type TraitItem = Item<TraitItemKind>;
 
 #[derive(Debug, Clone, Traversable, TraversableMut)]
 pub enum TraitItemKind {
-    Fn(FnSig),
+    Fn(Fn),
     Ty(TypeAlias),
 }
 
@@ -529,16 +597,6 @@ pub struct QSelf {
     pub trait_: Path,
 }
 
-impl ToString for Path {
-    fn to_string(&self) -> String {
-        self.segments
-            .iter()
-            .map(|seg| seg.name.text.as_str()) // 假设 StringId 实现了 ToString
-            .collect::<Vec<_>>()
-            .join("::")
-    }
-}
-
 #[derive(Debug, Clone, Traversable, TraversableMut)]
 pub struct PathSegment {
     pub node_id: NodeId,
@@ -593,7 +651,7 @@ impl Generics {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.params.is_empty()
+        self.node_id == DUMMY_NODE_ID
     }
 }
 
@@ -656,7 +714,7 @@ impl Ident {
                 generic_args: None,
             }],
             span: self.span,
-            qself: None
+            qself: None,
         }
     }
 }

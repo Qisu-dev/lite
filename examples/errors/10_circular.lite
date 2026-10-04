@@ -1,0 +1,3 @@
+mod circular_a;
+
+fn main() { }

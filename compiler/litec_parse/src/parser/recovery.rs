@@ -53,7 +53,7 @@ pub(crate) enum Cond {
 }
 
 impl Cond {
-    pub(crate) fn eval(&self, ctx: &mut ParseCtx<'_, '_>) -> bool {
+    pub(crate) fn eval(&self, ctx: &mut ParseCtx) -> bool {
         match self {
             Cond::ErrorCountLt(n) => ctx.diags_count() < *n,
             Cond::At(sync) => sync.matches(ctx.peek_kind()),
@@ -71,7 +71,7 @@ pub(crate) enum RecoveryResult {
     Failed, // 放弃
 }
 
-pub(crate) type RecoverFn = fn(&mut ParseCtx<'_, '_>) -> RecoveryResult;
+pub(crate) type RecoverFn = fn(&mut ParseCtx) -> RecoveryResult;
 
 /// 顶层 item 列表
 pub(crate) const SYNC_ITEM: SyncSet = SyncSet(&[

@@ -9,14 +9,14 @@ use litec_error::PResult;
 use litec_span::{Span, Spanned};
 
 impl Parse for Pat {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_pat_or()
     }
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
+impl ParseCtx<'_> {
     fn parse_pat_or(&mut self) -> PResult<Pat> {
-        let start = self.current_span();
+        let _start = self.current_span();
 
         // 前导 `|` 可选——支持 `| A | B` 与多行写法
         self.eat(tok!(|));
@@ -235,7 +235,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
                 if self.cursor != mark.cursor {
                     Err(e)
                 } else {
-                    self.restore(mark);
+                    self.reset(mark);
                     Ok(None)
                 }
             }
@@ -259,6 +259,6 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
     }
 
     fn parse_pat_expr(&mut self) -> PResult<Expr> {
-        self.parse_expr_with_precedence(Precedence::BitOr.next())
+        ParseCtx::parse_expr_with_precedence(self, Precedence::BitOr.next())
     }
 }

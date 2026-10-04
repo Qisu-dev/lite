@@ -1,5 +1,6 @@
 use std::{
-    path::PathBuf,
+    collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
@@ -13,13 +14,12 @@ pub struct FileId(pub usize);
 pub struct SourceFile {
     pub name: String,
     pub path: PathBuf,
-    pub content: String,
+    pub content: Arc<str>,
     pub line_offsets: Box<[usize]>,
 }
 
 impl SourceFile {
-    pub fn new(name: impl Into<String>, path: PathBuf, content: impl Into<String>) -> Self {
-        let content = content.into();
+    pub fn new(name: impl Into<String>, path: PathBuf, content: Arc<str>) -> Self {
         let mut line_offsets = vec![0];
         let mut pos = 0;
         for ch in content.chars() {
@@ -59,39 +59,66 @@ impl SourceFile {
     }
 }
 
-/// 全局源码管理器#[derive(Debug, Default)]
 #[derive(Debug)]
 pub struct SourceMap {
-    /// 内部加锁——外层 `Arc<SourceMap>` 共享不变
-    /// `SourceFile` 一旦创建就不可变，所以用 `Arc` 共享
-    files: RwLock<Vec<Arc<SourceFile>>>,
+    inner: RwLock<SourceMapInner>,
+}
+
+#[derive(Debug)]
+struct SourceMapInner {
+    files: Vec<Arc<SourceFile>>,
+    by_path: HashMap<PathBuf, FileId>,
 }
 
 impl SourceMap {
     pub fn new() -> Self {
         Self {
-            files: RwLock::new(Vec::new()),
+            inner: RwLock::new(SourceMapInner {
+                files: Vec::new(),
+                by_path: HashMap::new(),
+            }),
         }
     }
 
-    pub fn add_file(&self, path: impl Into<PathBuf>, content: impl Into<String>) -> FileId {
-        let path_buf = path.into();
-        let mut files = self.files.write().unwrap();
+    /// 注册文件——同一路径幂等，返回已有 FileId。
+    pub fn add_file(&self, path: impl Into<PathBuf>, content: Arc<str>) -> FileId {
+        let path = path.into();
+        let path = dunce::canonicalize(&path).unwrap_or(path);
+        let mut inner = self.inner.write().unwrap();
 
-        let id = FileId(files.len());
-        let name = path_buf
+        // 已注册——返回旧的
+        if let Some(&fid) = inner.by_path.get(&path) {
+            return fid;
+        }
+
+        let id = FileId(inner.files.len());
+        let name = path
             .file_name()
             .and_then(|os| os.to_str())
             .map(String::from)
-            .unwrap_or_else(|| path_buf.to_string_lossy().to_string());
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
 
-        let file = Arc::new(SourceFile::new(name, path_buf, content.into()));
-        files.push(file);
+        let file = Arc::new(SourceFile::new(name, path.clone(), content));
+        inner.files.push(file);
+        inner.by_path.insert(path, id);
         id
     }
 
+    pub fn file_id_for(&self, path: &Path) -> Option<FileId> {
+        self.inner.read().unwrap().by_path.get(path).copied()
+    }
+
     pub fn file(&self, file_id: FileId) -> Option<Arc<SourceFile>> {
-        self.files.read().unwrap().get(file_id.0).cloned()
+        self.inner.read().unwrap().files.get(file_id.0).cloned()
+    }
+
+    pub fn file_path(&self, file_id: FileId) -> Option<PathBuf> {
+        self.inner
+            .read()
+            .unwrap()
+            .files
+            .get(file_id.0)
+            .map(|f| f.path.clone())
     }
 
     pub fn line_col(&self, span: &Span) -> Option<(usize, usize)> {
@@ -99,9 +126,28 @@ impl SourceMap {
         Some(file.line_col(span.start))
     }
 
-    /// 返回 `String`——因为不能从锁守卫后借用
     pub fn snippet(&self, span: &Span) -> Option<String> {
         let file = self.file(span.file_id)?;
         file.content.get(span.start..span.end).map(String::from)
     }
+
+    /// 显示用路径 —— 相对 CWD。
+    /// 存的是绝对路径，这里是展示层。
+    pub fn display_path(&self, file_id: FileId) -> String {
+        let abs = match self.file_path(file_id) {
+            Some(p) => p,
+            None => return "<unknown>".into(),
+        };
+        display_path(&abs)
+    }
+}
+
+pub fn display_path(abs: &Path) -> String {
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
+        if let Ok(rel) = abs.strip_prefix(&cwd) {
+            return rel.display().to_string();
+        }
+    }
+    abs.display().to_string()
 }

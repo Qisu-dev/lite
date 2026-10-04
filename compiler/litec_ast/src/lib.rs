@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod token;
+pub mod printer;
 pub use token::TokenKind;
 
 pub mod util {

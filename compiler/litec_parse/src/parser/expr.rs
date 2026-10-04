@@ -1,5 +1,6 @@
 use litec_ast::ast::{
-    Arm, AssignOp, BinOp, Block, ClosureParam, Expr, ExprKind, GenericArgs, Ident, Mutability, Pat, Path, PathSegment, QSelf, Stmt, StructExpr, StructExprField, Ty, UnOp,
+    Arm, AssignOp, BinOp, Block, ClosureParam, Expr, ExprKind, GenericArgs, Ident, Mutability, Pat,
+    Path, PathSegment, QSelf, RangeLimits, Stmt, StructExpr, StructExprField, Ty, UnOp,
 };
 use litec_ast::token::{Lit, LiteralKind};
 use litec_ast::util::{AssocOp, Fixity, Precedence};
@@ -14,45 +15,14 @@ use super::ParseCtx;
 use super::trait_::Parse;
 
 impl Parse for Ident {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         let token = ctx.expect(tok!(Ident))?;
         Ok(Ident::new(token.text, token.span))
     }
 }
 
-impl Parse for PathSegment {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
-        let ident: Ident = ctx.parse()?;
-
-        let mark = ctx.mark();
-
-        if (ctx.current_context() != ParseContext::Expr && ctx.check(tok!(<)))
-            || (ctx.eat(tok!(::)) && ctx.check(tok!(<)))
-        {
-            let generic_args: GenericArgs = ctx.parse()?;
-
-            let span = ident.span.extend(generic_args.span);
-            return Ok(PathSegment {
-                node_id: ctx.node_id(),
-                name: ident,
-                span,
-                generic_args: Some(generic_args),
-            });
-        }
-
-        ctx.restore(mark);
-        let span = ident.span;
-        Ok(PathSegment {
-            node_id: ctx.node_id(),
-            name: ident,
-            span,
-            generic_args: None,
-        })
-    }
-}
-
 impl Parse for Path {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         let start = ctx.current_span();
 
         // 前导 `<` —— qself
@@ -76,7 +46,48 @@ impl Parse for Path {
     }
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
+impl Parse for PathSegment {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
+        let ident = match ctx.peek_kind() {
+            TokenKind::Ident
+            | TokenKind::SelfLower
+            | TokenKind::SelfUpper
+            | TokenKind::Crate
+            | TokenKind::Super => {
+                let tok = ctx.bump();
+                Ident::new(tok.text, tok.span)
+            }
+            _ => return Err(ctx.unexpected(&[Expected::Ident])),
+        };
+
+        let mark = ctx.mark();
+
+        if (ctx.current_context() != ParseContext::Expr && ctx.check(tok!(<)))
+            || (ctx.eat(tok!(::)) && ctx.check(tok!(<)))
+        {
+            let generic_args: GenericArgs = ctx.parse()?;
+
+            let span = ident.span.extend(generic_args.span);
+            return Ok(PathSegment {
+                node_id: ctx.node_id(),
+                name: ident,
+                span,
+                generic_args: Some(generic_args),
+            });
+        }
+
+        ctx.reset(mark);
+        let span = ident.span;
+        Ok(PathSegment {
+            node_id: ctx.node_id(),
+            name: ident,
+            span,
+            generic_args: None,
+        })
+    }
+}
+
+impl ParseCtx<'_> {
     /// `<Ty as Trait>::segment::...`
     fn parse_qpath(&mut self, start: Span) -> PResult<Path> {
         self.expect(tok!(<))?;
@@ -131,75 +142,133 @@ impl Parse for Expr {
     }
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
+impl ParseCtx<'_> {
     #[inline]
     pub(crate) fn parse_expr(&mut self) -> PResult<Expr> {
-        self.parse_expr_with_precedence(Precedence::Jump)
+        ParseCtx::parse_expr_with_precedence(self, Precedence::Jump)
     }
 
     pub(crate) fn parse_expr_with_precedence(&mut self, min_bp: Precedence) -> PResult<Expr> {
-        let mut lhs = self.parse_prefix()?;
-        lhs = self.parse_postfix(lhs)?;
+        self.with_context(ParseContext::Expr, |ctx| {
+            let mut lhs = ctx.parse_prefix()?;
+            lhs = ctx.parse_postfix(lhs)?;
 
-        loop {
-            let op = match AssocOp::from_token(self.peek(0)) {
-                Some(op) => op,
-                None => break,
-            };
-            let op_span = self.peek(0).span;
+            loop {
+                let op = match AssocOp::from_token(ctx.peek(0)) {
+                    Some(op) => op,
+                    None => break,
+                };
+                let op_span = ctx.peek(0).span;
 
-            if matches!(op, AssocOp::Cast) {
-                let p = Precedence::Cast;
-                if p < min_bp {
+                if matches!(op, AssocOp::Cast) {
+                    let p = Precedence::Cast;
+                    if p < min_bp {
+                        break;
+                    }
+                    ctx.bump();
+                    let ty: Ty = ctx.parse()?;
+                    let span = lhs.span.extend(ty.span);
+                    lhs = ctx.mk_expr(ExprKind::Cast(Box::new(lhs), Box::new(ty)), span);
+                    lhs = ctx.parse_postfix(lhs)?;
+                    continue;
+                }
+
+                if let AssocOp::Range(limits) = op {
+                    let p = Precedence::Range;
+                    if p < min_bp {
+                        break;
+                    }
+                    ctx.bump(); // `..` / `..=`
+
+                    let rhs = ctx.parse_optional_range_rhs()?;
+                    let span = match &rhs {
+                        Some(r) => lhs.span.extend(r.span),
+                        None => lhs.span.extend(op_span),
+                    };
+                    lhs = ctx.mk_expr(ExprKind::Range(Some(Box::new(lhs)), rhs, limits), span);
+                    continue;
+                }
+
+                let p = op.precedence();
+                let (l_bp, r_bp) = match op.fixity() {
+                    Fixity::Left | Fixity::None => (p, p.next()),
+                    Fixity::Right => (p, p),
+                };
+                if l_bp < min_bp {
                     break;
                 }
-                self.bump();
-                let ty: Ty = self.parse()?;
-                let span = lhs.span.extend(ty.span);
-                lhs = self.mk_expr(ExprKind::Cast(Box::new(lhs), Box::new(ty)), span);
-                lhs = self.parse_postfix(lhs)?;
-                continue;
-            }
 
-            // Range —— TODO: 三种形态，暂不支持
-            if matches!(op, AssocOp::Range(_)) {
-                break;
-            }
+                ctx.bump();
+                let rhs = ctx.parse_expr_with_precedence(r_bp)?;
+                let span = lhs.span.extend(rhs.span);
 
-            let p = op.precedence();
-            let (l_bp, r_bp) = match op.fixity() {
-                Fixity::Left | Fixity::None => (p, p.next()),
-                Fixity::Right => (p, p),
-            };
-            if l_bp < min_bp {
-                break;
-            }
-
-            self.bump();
-            let rhs = self.parse_expr_with_precedence(r_bp)?;
-            let span = lhs.span.extend(rhs.span);
-
-            lhs = match op {
-                AssocOp::Binary(bin_op) => self.mk_expr(
-                    ExprKind::Binary(Box::new(lhs), BinOp::new(bin_op, span), Box::new(rhs)),
-                    span,
-                ),
-                AssocOp::Assign => {
-                    self.mk_expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), span)
-                }
-                AssocOp::AssignOp(assign_op) => self.mk_expr(
-                    ExprKind::AssignOp(
-                        Box::new(lhs),
-                        AssignOp::new(assign_op, op_span),
-                        Box::new(rhs),
+                lhs = match op {
+                    AssocOp::Binary(bin_op) => ctx.mk_expr(
+                        ExprKind::Binary(Box::new(lhs), BinOp::new(bin_op, span), Box::new(rhs)),
+                        span,
                     ),
-                    span,
-                ),
-                AssocOp::Cast | AssocOp::Range(_) => unreachable!("handled above"),
-            };
-        }
+                    AssocOp::Assign => {
+                        ctx.mk_expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), span)
+                    }
+                    AssocOp::AssignOp(assign_op) => ctx.mk_expr(
+                        ExprKind::AssignOp(
+                            Box::new(lhs),
+                            AssignOp::new(assign_op, op_span),
+                            Box::new(rhs),
+                        ),
+                        span,
+                    ),
+                    AssocOp::Cast | AssocOp::Range(_) => {
+                        unreachable!("handled above")
+                    }
+                };
+            }
 
-        Ok(lhs)
+            Ok(lhs)
+        })
+    }
+
+    fn parse_range_prefix(&mut self, start: Span) -> PResult<Expr> {
+        let limits = match self.peek_kind() {
+            tok!(..) => {
+                self.bump();
+                RangeLimits::HalfOpen
+            }
+            tok!(..=) => {
+                self.bump();
+                RangeLimits::Closed
+            }
+            _ => {
+                return Err(
+                    self.unexpected(&[Expected::Exact(tok!(..)), Expected::Exact(tok!(..=))])
+                );
+            }
+        };
+
+        let rhs = self.parse_optional_range_rhs()?;
+        let span = match &rhs {
+            Some(r) => start.extend(r.span),
+            None => start.extend(self.prev_span()),
+        };
+
+        Ok(self.mk_expr(ExprKind::Range(None, rhs, limits), span))
+    }
+
+    /// 可选 RHS `a..b` 有，`a..` 没有。
+    fn parse_optional_range_rhs(&mut self) -> PResult<Option<Box<Expr>>> {
+        let mark = self.mark();
+
+        match ParseCtx::parse_expr_with_precedence(self, Precedence::Range.next()) {
+            Ok(e) => Ok(Some(Box::new(e))),
+            Err(e) => {
+                if self.cursor != mark.cursor {
+                    Err(e)
+                } else {
+                    self.reset(mark);
+                    Ok(None)
+                }
+            }
+        }
     }
 
     fn parse_prefix(&mut self) -> PResult<Expr> {
@@ -236,6 +305,14 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             tok!(loop) => self.parse_loop_expr(),
             tok!(while) => self.parse_while_expr(),
             tok!(for) => self.parse_for_expr(),
+            tok!(true) => {
+                let token = self.bump();
+                Ok(self.mk_expr(ExprKind::Bool(true), token.span))
+            }
+            tok!(false) => {
+                let token = self.bump();
+                Ok(self.mk_expr(ExprKind::Bool(false), token.span))
+            }
 
             tok!(return) => self.parse_return_expr(),
             tok!(break) => self.parse_break_expr(),
@@ -350,7 +427,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
     /// `|| body` —— 零参数闭包
     fn parse_closure_no_params(&mut self, start: Span) -> PResult<Expr> {
         self.bump(); // `||`
-        let body = self.parse_expr_with_precedence(Precedence::Jump)?;
+        let body = ParseCtx::parse_expr_with_precedence(self, Precedence::Jump)?;
         let span = start.extend(body.span);
         Ok(self.mk_expr(ExprKind::Closure(Vec::new(), Box::new(body)), span))
     }
@@ -379,7 +456,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
         self.expect(tok!(|))?; // 结束的 `|`
 
-        let body = self.parse_expr_with_precedence(Precedence::Jump)?;
+        let body = ParseCtx::parse_expr_with_precedence(self, Precedence::Jump)?;
         let span = start.extend(body.span);
         Ok(self.mk_expr(ExprKind::Closure(params, Box::new(body)), span))
     }
@@ -394,7 +471,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         Ok(ClosureParam { name, ty })
     }
 
-    fn parse_let_expr(&mut self, base_span: Span) -> PResult<Expr> {
+    fn parse_let_expr(&mut self, _base_span: Span) -> PResult<Expr> {
         let start = self.expect(tok!(let))?.span;
 
         let pat: Pat = self.parse()?;
@@ -451,7 +528,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
                 return Ok(ctx.mk_expr(ExprKind::Tuple(vec![]), start.extend(end)));
             }
 
-            let first = ctx.parse_expr_with_precedence(Precedence::Jump)?;
+            let first = ParseCtx::parse_expr_with_precedence(ctx, Precedence::Jump)?;
 
             // `(e)`
             if ctx.check(tok!(CloseParen)) {
@@ -465,7 +542,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
                 if ctx.check(tok!(CloseParen)) {
                     break;
                 }
-                elements.push(ctx.parse_expr_with_precedence(Precedence::Jump)?);
+                elements.push(ParseCtx::parse_expr_with_precedence(ctx, Precedence::Jump)?);
             }
             let end = ctx.expect(tok!(CloseParen))?.span;
             Ok(ctx.mk_expr(ExprKind::Tuple(elements), start.extend(end)))
@@ -639,7 +716,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
     fn parse_unary(&mut self, op: UnOp, span: Span) -> PResult<Expr> {
         self.bump();
-        let operand = self.parse_expr_with_precedence(Precedence::Prefix)?;
+        let operand = ParseCtx::parse_expr_with_precedence(self, Precedence::Prefix)?;
         let span = span.extend(operand.span);
         Ok(self.mk_expr(ExprKind::Unary(op, Box::new(operand)), span))
     }
@@ -651,32 +728,38 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         } else {
             Mutability::Immut
         };
-        let operand = self.parse_expr_with_precedence(Precedence::Prefix)?;
+        let operand = ParseCtx::parse_expr_with_precedence(self, Precedence::Prefix)?;
         let span = span.extend(operand.span);
         Ok(self.mk_expr(ExprKind::AddressOf(mutability, Box::new(operand)), span))
     }
 
     fn parse_deref_expr(&mut self, span: Span) -> PResult<Expr> {
         self.bump();
-        let operand = self.parse_expr_with_precedence(Precedence::Prefix)?;
+        let operand = ParseCtx::parse_expr_with_precedence(self, Precedence::Prefix)?;
         let span = span.extend(operand.span);
         Ok(self.mk_expr(ExprKind::Deref(Box::new(operand)), span))
     }
 }
 
 impl Parse for Block {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         let start = ctx.expect(tok!(OpenBrace))?.span;
 
         let mut stmts = vec![];
 
         while !ctx.at_eof() && ctx.peek_kind() != tok!(CloseBrace) {
+            let before = ctx.cursor;
+
             match ctx.parse() {
                 Ok(stmt) => stmts.push(stmt),
                 Err(e) => match run_recovery(Stmt::recovery(), ctx) {
                     RecoveryResult::Failed => return Err(e),
                     RecoveryResult::Ok => {}
                 },
+            }
+
+            if ctx.cursor == before {
+                ctx.bump();
             }
         }
 

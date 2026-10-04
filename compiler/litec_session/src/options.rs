@@ -27,8 +27,6 @@ pub struct SessOptions {
     pub debug_info: bool,
     /// 是否生成 LLVM IR
     pub emit_llvm_ir: bool,
-    /// 是否输出 JSON 诊断
-    pub json_diagnostics: bool,
 }
 
 impl SessOptions {
@@ -40,7 +38,6 @@ impl SessOptions {
             sysroot,
             debug_info: false,
             emit_llvm_ir: false,
-            json_diagnostics: false,
         }
     }
 
@@ -56,11 +53,6 @@ impl SessOptions {
 
     pub fn with_emit_llvm_ir(mut self, enable: bool) -> Self {
         self.emit_llvm_ir = enable;
-        self
-    }
-
-    pub fn with_json_diagnostics(mut self, enable: bool) -> Self {
-        self.json_diagnostics = enable;
         self
     }
 

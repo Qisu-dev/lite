@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use crate::parser::recovery::SYNC_ITEM;
 use crate::parser::{Expected, ParseCtx, recovery::Recovery, trait_::Parse};
+use litec_ast::TokenKind;
 use litec_ast::{
     ast::{
         AssociatedConstant, AssociatedType, Attr, AttrArg, Block, Bounds, Enum, Extern, ExternItem,
@@ -13,37 +16,38 @@ use litec_ast::{
 use litec_error::{Diag, PResult};
 use litec_span::Span;
 
-impl Parse for Item {
+impl Parse for Item<ItemKind> {
     fn recovery() -> Recovery {
         Recovery::SkipTo(SYNC_ITEM)
     }
 
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_item()
     }
 }
 
 impl Parse for TraitItem {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_trait_item()
     }
 }
 
 impl Parse for ImplItem {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_impl_item()
     }
 }
 
 impl Parse for ExternItem {
-    fn parse(ctx: &mut ParseCtx<'_, '_>) -> PResult<Self> {
+    fn parse(ctx: &mut ParseCtx) -> PResult<Self> {
         ctx.parse_extern_item()
     }
 }
 
-impl<'a, 'src> ParseCtx<'a, 'src> {
+impl ParseCtx<'_> {
     pub(crate) fn parse_item(&mut self) -> PResult<Item> {
         let start = self.current_span();
+        let docs = self.take_docs();
         let attrs = self.parse_attrs()?;
         let vis = self.parse_visibility();
 
@@ -73,23 +77,12 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             tok!(type) => ItemKind::TypeAlias(self.parse_type_alias()?),
             tok!(extern) => ItemKind::Extern(self.parse_extern()?),
             _ => {
-                return Err(self.unexpected(&[
-                    Expected::Exact(tok!(fn)),
-                    Expected::Exact(tok!(struct)),
-                    Expected::Exact(tok!(enum)),
-                    Expected::Exact(tok!(trait)),
-                    Expected::Exact(tok!(impl)),
-                    Expected::Exact(tok!(mod)),
-                    Expected::Exact(tok!(use)),
-                    Expected::Exact(tok!(const)),
-                    Expected::Exact(tok!(static)),
-                    Expected::Exact(tok!(type)),
-                    Expected::Exact(tok!(extern)),
-                ]));
+                return Err(self.unexpected(&[Expected::Item]));
             }
         };
 
         Ok(Item {
+            docs,
             node_id: self.node_id(),
             attr: attrs,
             visibility: vis,
@@ -488,14 +481,35 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
     pub(crate) fn parse_trait_item(&mut self) -> PResult<TraitItem> {
         let start = self.current_span();
+        let docs = self.take_docs();
         let attrs = self.parse_attrs()?;
         let vis = self.parse_visibility();
 
         let kind = match self.peek_kind() {
-            tok!(fn) => TraitItemKind::Fn(self.parse_fn_sig()?),
+            tok!(fn) => {
+                let sig = self.parse_fn_sig()?;
+
+                if self.check(tok!(OpenBrace)) {
+                    let body = self.parse::<Block>()?;
+                    TraitItemKind::Fn(Fn {
+                        node_id: self.node_id(),
+                        sig,
+                        body: Some(body),
+                    })
+                } else {
+                    self.eat(tok!(;));
+                    TraitItemKind::Fn(Fn {
+                        node_id: self.node_id(),
+                        sig,
+                        body: None,
+                    })
+                }
+            }
             tok!(type) => {
                 self.bump();
-                TraitItemKind::Ty(self.parse_assoc_type_body()?)
+                let ta = self.parse_assoc_type_body()?;
+                self.eat(tok!(;));
+                TraitItemKind::Ty(ta)
             }
             _ => {
                 return Err(
@@ -505,6 +519,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         };
 
         Ok(Item {
+            docs,
             node_id: self.node_id(),
             attr: attrs,
             visibility: vis,
@@ -582,6 +597,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
     pub(crate) fn parse_impl_item(&mut self) -> PResult<ImplItem> {
         let start = self.current_span();
+        let docs = self.take_docs();
         let attrs = self.parse_attrs()?;
         let vis = self.parse_visibility();
 
@@ -590,7 +606,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
             tok!(type) => {
                 self.bump();
                 let name: Ident = self.parse()?;
-                let generics = self.parse_generics()?;
+                let _generics = self.parse_generics()?;
                 let bounds = if self.eat(tok!(:)) {
                     Some(self.parse_bounds()?)
                 } else {
@@ -641,6 +657,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         };
 
         Ok(Item {
+            docs,
             node_id: self.node_id(),
             attr: attrs,
             visibility: vis,
@@ -654,17 +671,81 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         let name: Ident = self.parse()?;
 
         if self.eat(tok!(;)) {
-            return Ok(ItemKind::Module(name, Inline::External(Vec::new())));
+            let items = self.load_external_module(&name)?;
+            return Ok(ItemKind::Module(name, Inline::External(items)));
         }
 
+        // 内联
         self.expect(tok!(OpenBrace))?;
         let mut items = Vec::new();
         while !self.check(tok!(CloseBrace)) && !self.at_eof() {
             items.push(self.parse_item()?);
         }
         self.expect(tok!(CloseBrace))?;
-
         Ok(ItemKind::Module(name, Inline::Inline(items)))
+    }
+
+    fn load_external_module(&mut self, name: &Ident) -> PResult<Vec<Item>> {
+        let span = name.span;
+        let name_str = name.text.as_str();
+
+        let file_dir = self
+            .session
+            .source_map()
+            .file_path(self.file_id)
+            .and_then(|p| p.parent().map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        // 平铺 —— 文件目录/<name>.lite
+        let flat = file_dir.join(format!("{}.lite", name_str));
+
+        // 嵌套 —— module_dir/<name>.lite
+        let nested = self.module_dir.join(format!("{}.lite", name_str));
+
+        let path = if flat.is_file() {
+            flat
+        } else if nested.is_file() {
+            nested
+        } else {
+            let mut diag = Diag::error(format!("cannot load `{}`", name_str))
+                .with_span(span)
+                .with_note(format!("tried: {}", litec_span::display_path(&flat)));
+            if nested != flat {
+                diag = diag.with_note(format!("tried: {}", litec_span::display_path(&nested)));
+            }
+            return Err(self.emit(diag));
+        };
+
+        // 循环检测
+        if self.session.is_loading(&path) {
+            return Err(
+                self.emit(Diag::error(format!("circular module: `{}`", name_str)).with_span(span))
+            );
+        }
+
+        // 加载
+        let sub_file_id = match self.session.source_map().file_id_for(&path) {
+            Some(fid) => fid,
+            None => {
+                let src = std::fs::read_to_string(&path).map_err(|e| {
+                    self.emit(
+                        Diag::error(format!("cannot read `{}`: {}", path.display(), e))
+                            .with_span(span),
+                    )
+                })?;
+                self.session.source_map().add_file(path.clone(), src.into())
+            }
+        };
+
+        // 子模块的 module_dir = 当前 / <name>
+        let sub_module_dir = self.module_dir.join(name_str);
+
+        // `_guard` 不是 `_`
+        let _guard = self.session.enter_module(path);
+
+        let mut sub_ctx = ParseCtx::with_module_dir(self.session, sub_file_id, sub_module_dir);
+        sub_ctx.parse_list::<Item>(TokenKind::Eof, None)
+        // _guard 在这里 drop
     }
 
     pub(crate) fn parse_use_tree(&mut self) -> PResult<UseTree> {
@@ -808,6 +889,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
 
     pub(crate) fn parse_extern_item(&mut self) -> PResult<ExternItem> {
         let start = self.current_span();
+        let docs = self.take_docs();
         let attrs = self.parse_attrs()?;
         let vis = self.parse_visibility();
 
@@ -830,6 +912,7 @@ impl<'a, 'src> ParseCtx<'a, 'src> {
         };
 
         Ok(Item {
+            docs,
             node_id: self.node_id(),
             attr: attrs,
             visibility: vis,
